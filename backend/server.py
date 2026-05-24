@@ -182,9 +182,15 @@ async def home_stats():
 # ------------------ Applications (public — applicant creates, no login) ------------------
 @api.post("/applications")
 async def create_application(payload: ApplicationCreate):
-    prop = await db.properties.find_one({"id": payload.property_id}, {"_id": 0})
+    # Accept either UUID id or slug from the frontend (slug URLs are now in use).
+    prop = await db.properties.find_one(
+        {"$or": [{"id": payload.property_id}, {"slug": payload.property_id}]},
+        {"_id": 0},
+    )
     if not prop:
         raise HTTPException(404, "Property not found")
+    # Normalize: store canonical UUID on the application so downstream lookups work.
+    canonical_property_id = prop["id"]
     now = datetime.now(timezone.utc).isoformat()
     app_id = str(uuid.uuid4())
     app_number = f"APP-{uuid.uuid4().hex[:8].upper()}"
@@ -205,7 +211,7 @@ async def create_application(payload: ApplicationCreate):
     doc = {
         "id": app_id,
         "application_number": app_number,
-        "property_id": payload.property_id,
+        "property_id": canonical_property_id,
         "applicant_name": applicant_name,
         "applicant_email": applicant_email.lower(),
         "applicant_phone": applicant_phone,
