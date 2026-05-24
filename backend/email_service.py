@@ -5,6 +5,7 @@
 """
 import smtplib
 import ssl
+import asyncio
 import logging
 from email.message import EmailMessage
 from string import Template
@@ -143,7 +144,7 @@ async def send_email(db, to_email: str, subject: str, text_body: str) -> Tuple[b
         return False, "SMTP not configured / disabled"
     try:
         msg = _build_message(subject, text_body, smtp["from_email"], to_email)
-        _smtp_send_sync(smtp, msg)
+        await asyncio.to_thread(_smtp_send_sync, smtp, msg)
         return True, None
     except Exception as e:
         logger.warning(f"SMTP send failed: {e}")

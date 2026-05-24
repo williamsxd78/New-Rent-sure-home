@@ -6,6 +6,7 @@ load_dotenv(ROOT_DIR / '.env')
 
 import os
 import uuid
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
@@ -313,10 +314,10 @@ async def payment_init(payload: PaymentInit, request: Request):
     cancel_url = f"{origin}/payment/cancel?app_id={payload.application_id}"
     try:
         cli = PayPalClient(cfg["mode"], cfg["client_id"], cfg["client_secret"])
-        order = cli.create_order(
-            amount=payload.amount, currency="USD",
-            return_url=return_url, cancel_url=cancel_url,
-            custom_id=appdoc.get("application_number", payload.application_id),
+        order = await asyncio.to_thread(
+            cli.create_order,
+            payload.amount, "USD", return_url, cancel_url,
+            appdoc.get("application_number", payload.application_id),
         )
     except Exception as e:
         logger.error(f"PayPal init failed: {e}")
@@ -813,7 +814,7 @@ async def admin_paypal_test(admin=Depends(require_admin)):
         return {"status": "ok", "mode": "demo", "note": "Demo mode — no live PayPal call"}
     try:
         cli = PayPalClient(cfg["mode"], cfg["client_id"], cfg["client_secret"])
-        result = cli.test_connection()
+        result = await asyncio.to_thread(cli.test_connection)
         return {"status": "ok", **result}
     except Exception as e:
         raise HTTPException(400, f"PayPal test failed: {e}")

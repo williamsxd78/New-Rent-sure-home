@@ -11,7 +11,6 @@ const STEPS = [
   "Personal Information",
   "Contact & Address",
   "Employment & Income",
-  "Rental History",
   "Occupants & Pets",
   "Screening Consent",
   "Document Upload",
@@ -24,13 +23,14 @@ const blank = {
   personal: { first_name: "", middle_name: "", last_name: "", dob: "", id_type: "Driver License", id_number: "", ssn_last4: "", ssn_full: "", marital_status: "" },
   contact: { email: "", phone: "", current_address: "", city: "", state: "", zip: "", duration: "", current_rent: "", landlord_name: "", landlord_phone: "" },
   employment: { status: "Employed", employer: "", title: "", employer_phone: "", monthly_income: "", additional_income: "", income_source: "", start_date: "" },
-  rental_history: { previous_address: "", previous_landlord: "", reason_for_moving: "", prior_evictions: "No" },
-  occupants: { adults: 1, children: 0, other_occupants: "", pets: "No", pet_details: "", smoking: "No", move_in_date: "" },
+  occupants: { adults: 1, children: 0, other_occupants: "", pets: "No", smoking: "No", move_in_date: "" },
   consent: { identity: false, credit: false, background: false, criminal: false, eviction: false, employment: false, fee_disclosure: false, truth_certification: false },
   signature_name: "",
   signature_date: "",
   agreed_signature: false,
 };
+
+const REQUIRED_DOC_TYPES = ["Driver License", "Paystub 1", "Paystub 2", "W-2 / Tax Document"];
 
 export default function ApplyPage() {
   const { propertyId } = useParams();
@@ -43,7 +43,7 @@ export default function ApplyPage() {
   });
   const [appResult, setAppResult] = useState(null); // {id, application_number, application_fee}
   const [paymentDone, setPaymentDone] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({}); // { docType: 0-100 }
   const [uploaded, setUploaded] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -70,18 +70,27 @@ export default function ApplyPage() {
     if (step === 2) {
       if (!data.employment.monthly_income) return setError("Monthly income is required") || false;
     }
-    if (step === 5) {
+    if (step === 4) {
       const c = data.consent;
       const required = ["identity", "credit", "background", "criminal", "eviction", "employment", "fee_disclosure", "truth_certification"];
       if (!required.every((k) => c[k])) return setError("Please authorize all required checks to continue") || false;
       if (!data.signature_name || !data.agreed_signature) return setError("Electronic signature is required") || false;
+    }
+    if (step === 5) {
+      // Documents must all be uploaded before continuing
+      const uploadedTypes = new Set(uploaded.map((u) => u.type));
+      const missing = REQUIRED_DOC_TYPES.filter((t) => !uploadedTypes.has(t));
+      if (property?.require_ssn && !uploadedTypes.has("SSN Document")) missing.push("SSN Document");
+      if (missing.length > 0) {
+        return setError(`Please upload all required documents: ${missing.join(", ")}`) || false;
+      }
     }
     return true;
   };
 
   const next = async () => {
     if (!validateStep()) return;
-    if (step === 7 && !appResult) {
+    if (step === 6 && !appResult) {
       // submit application before payment
       try {
         setSubmitting(true);
@@ -90,7 +99,6 @@ export default function ApplyPage() {
           personal: data.personal,
           contact: data.contact,
           employment: data.employment,
-          rental_history: data.rental_history,
           occupants: data.occupants,
           consent: data.consent,
           documents: uploaded,
@@ -130,12 +138,26 @@ export default function ApplyPage() {
     const fd = new FormData();
     fd.append("doc_type", docType);
     fd.append("file", file);
-    setUploading(true);
+    setUploadProgress((p) => ({ ...p, [docType]: 1 }));
+    setError("");
     try {
-      const r = await api.post(`/applications/${appId}/upload`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      setUploaded((u) => [...u, r.data]);
-    } catch (e) { setError("Upload failed: " + (e?.response?.data?.detail || "")); }
-    finally { setUploading(false); }
+      const r = await api.post(`/applications/${appId}/upload`, fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress: (e) => {
+          if (e.total) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress((p) => ({ ...p, [docType]: pct }));
+          }
+        },
+      });
+      // Remove any prior upload of the same type, then add new
+      setUploaded((u) => [...u.filter((x) => x.type !== docType), r.data]);
+      setUploadProgress((p) => ({ ...p, [docType]: 100 }));
+      setTimeout(() => setUploadProgress((p) => { const n = { ...p }; delete n[docType]; return n; }), 800);
+    } catch (e) {
+      setError("Upload failed: " + (e?.response?.data?.detail || ""));
+      setUploadProgress((p) => { const n = { ...p }; delete n[docType]; return n; });
+    }
   };
 
   const handlePay = async () => {
@@ -161,7 +183,7 @@ export default function ApplyPage() {
   const finalSubmit = () => {
     setConfirmOpen(false);
     localStorage.removeItem(`rs_apply_${propertyId}`);
-    setStep(9);
+    setStep(8);
   };
 
   const progress = ((step + 1) / STEPS.length) * 100;
@@ -211,24 +233,23 @@ export default function ApplyPage() {
               {step === 0 && <Step1 d={data.personal} update={(f, v) => update("personal", f, v)} requireSSN={property?.require_ssn} />}
               {step === 1 && <Step2 d={data.contact} update={(f, v) => update("contact", f, v)} />}
               {step === 2 && <Step3 d={data.employment} update={(f, v) => update("employment", f, v)} />}
-              {step === 3 && <Step4 d={data.rental_history} update={(f, v) => update("rental_history", f, v)} />}
-              {step === 4 && <Step5 d={data.occupants} update={(f, v) => update("occupants", f, v)} />}
-              {step === 5 && <Step6 d={data} setTop={setTop} update={(f, v) => update("consent", f, v)} />}
-              {step === 6 && <Step7 onUpload={handleFileUpload} uploading={uploading} uploaded={uploaded} requireSSN={property?.require_ssn} />}
-              {step === 7 && <Step8 data={data} property={property} uploaded={uploaded} onEdit={setStep} />}
-              {step === 8 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} />}
-              {step === 9 && <Step10 appResult={appResult} property={property} />}
+              {step === 3 && <Step5 d={data.occupants} update={(f, v) => update("occupants", f, v)} />}
+              {step === 4 && <Step6 d={data} setTop={setTop} update={(f, v) => update("consent", f, v)} />}
+              {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} requireSSN={property?.require_ssn} />}
+              {step === 6 && <Step8 data={data} property={property} uploaded={uploaded} onEdit={setStep} />}
+              {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} />}
+              {step === 8 && <Step10 appResult={appResult} property={property} />}
 
-              {step < 9 && (
+              {step < 8 && (
                 <div className="mt-9 pt-6 border-t border-slate-100 flex flex-wrap justify-between gap-3" data-testid="apply-nav">
                   <button onClick={back} disabled={step === 0} className="rs-btn-outline disabled:opacity-40" data-testid="apply-back">
                     <ChevronLeft className="w-4 h-4" /> Back
                   </button>
-                  {step === 7 ? (
+                  {step === 6 ? (
                     <button onClick={next} disabled={submitting} className="rs-btn-primary" data-testid="apply-continue-to-payment">
                       {submitting ? "Submitting…" : "Continue to Payment"} <ChevronRight className="w-4 h-4" />
                     </button>
-                  ) : step === 8 ? (
+                  ) : step === 7 ? (
                     <button onClick={() => paymentDone && setConfirmOpen(true)} disabled={!paymentDone} className="rs-btn-primary disabled:opacity-40" data-testid="apply-final-submit">
                       Submit Application <ChevronRight className="w-4 h-4" />
                     </button>
@@ -331,17 +352,6 @@ function Step3({ d, update }) {
   );
 }
 
-function Step4({ d, update }) {
-  return (
-    <div className="grid sm:grid-cols-2 gap-4">
-      <Field label="Previous Address"><input className="rs-input" value={d.previous_address} onChange={(e) => update("previous_address", e.target.value)} data-testid="f-prev-addr" /></Field>
-      <Field label="Previous Landlord"><input className="rs-input" value={d.previous_landlord} onChange={(e) => update("previous_landlord", e.target.value)} data-testid="f-prev-landlord" /></Field>
-      <Field label="Reason for Moving"><input className="rs-input" value={d.reason_for_moving} onChange={(e) => update("reason_for_moving", e.target.value)} data-testid="f-reason-moving" /></Field>
-      <Field label="Prior Evictions?"><select className="rs-input" value={d.prior_evictions} onChange={(e) => update("prior_evictions", e.target.value)} data-testid="f-evictions"><option>No</option><option>Yes</option></select></Field>
-    </div>
-  );
-}
-
 function Step5({ d, update }) {
   return (
     <div className="grid sm:grid-cols-2 gap-4">
@@ -349,7 +359,6 @@ function Step5({ d, update }) {
       <Field label="Number of Children"><input type="number" className="rs-input" value={d.children} onChange={(e) => update("children", Number(e.target.value))} data-testid="f-children" /></Field>
       <Field label="Other Occupants"><input className="rs-input" value={d.other_occupants} onChange={(e) => update("other_occupants", e.target.value)} data-testid="f-other-occupants" /></Field>
       <Field label="Pets"><select className="rs-input" value={d.pets} onChange={(e) => update("pets", e.target.value)} data-testid="f-pets"><option>No</option><option>Yes</option></select></Field>
-      {d.pets === "Yes" && <Field label="Pet Type / Breed / Weight"><input className="rs-input" value={d.pet_details} onChange={(e) => update("pet_details", e.target.value)} data-testid="f-pet-details" /></Field>}
       <Field label="Smoking"><select className="rs-input" value={d.smoking} onChange={(e) => update("smoking", e.target.value)} data-testid="f-smoking"><option>No</option><option>Yes</option></select></Field>
       <Field label="Desired Move-in Date"><input type="date" className="rs-input" value={d.move_in_date} onChange={(e) => update("move_in_date", e.target.value)} data-testid="f-move-in" /></Field>
     </div>
@@ -403,41 +412,69 @@ const DOC_TYPES = [
   { key: "Additional Document", required: false },
 ];
 
-function Step7({ onUpload, uploading, uploaded, requireSSN }) {
+function Step7({ onUpload, progress, uploaded, requireSSN }) {
+  const allDocs = [...DOC_TYPES];
+  if (requireSSN) allDocs.push({ key: "SSN Document", required: true, sensitive: true });
+  const uploadedTypes = new Set(uploaded.map((u) => u.type));
+  const remainingRequired = allDocs.filter((d) => d.required && !uploadedTypes.has(d.key));
+
   return (
     <div>
       <h2 className="font-display text-xl font-semibold text-[#0A192F] mb-2">Upload Required Documents</h2>
-      <p className="text-sm text-slate-500 mb-5">Accepted formats: PDF, JPG, PNG · Max 10 MB per file</p>
+      <p className="text-sm text-slate-500 mb-5">Accepted formats: PDF, JPG, PNG · Max 10 MB per file. All required (*) documents must be uploaded to continue.</p>
+
+      {remainingRequired.length > 0 && (
+        <div className="mb-5 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 flex gap-2" data-testid="docs-remaining-notice">
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <div><strong>{remainingRequired.length} required document{remainingRequired.length > 1 ? "s" : ""}</strong> still needed: {remainingRequired.map((d) => d.key).join(", ")}</div>
+        </div>
+      )}
+
       <div className="grid sm:grid-cols-2 gap-4">
-        {DOC_TYPES.map((dt) => {
+        {allDocs.map((dt) => {
           const has = uploaded.find((u) => u.type === dt.key);
+          const pct = progress[dt.key];
+          const uploading = pct !== undefined && pct < 100;
+          const sensitive = dt.sensitive;
+          const baseCls = sensitive
+            ? "border-amber-300 bg-amber-50"
+            : has
+              ? "border-emerald-300 bg-emerald-50"
+              : "border-slate-200 hover:border-[#0A192F]";
           return (
-            <label key={dt.key} className={`block rounded-xl border-2 border-dashed p-5 cursor-pointer transition ${has ? "border-emerald-300 bg-emerald-50" : "border-slate-200 hover:border-[#0A192F]"}`} data-testid={`doc-${dt.key.replace(/\s+/g, "-").toLowerCase()}`}>
+            <label key={dt.key} className={`block rounded-xl border-2 border-dashed p-5 cursor-pointer transition ${baseCls}`} data-testid={`doc-${dt.key.replace(/\s+/g, "-").toLowerCase()}`}>
               <div className="flex items-center gap-3">
-                {has ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Upload className="w-5 h-5 text-slate-400" />}
-                <div>
-                  <div className="font-medium text-[#0A192F]">{dt.key}{dt.required && <span className="text-red-500"> *</span>}</div>
-                  <div className="text-xs text-slate-500">{has ? has.filename : "Click to upload"}</div>
+                {sensitive ? <Lock className="w-5 h-5 text-amber-700" /> : has ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Upload className="w-5 h-5 text-slate-400" />}
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
+                    <span>{dt.key}</span>
+                    {dt.required && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">Required</span>}
+                    {has && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Uploaded</span>}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate">
+                    {sensitive && !has ? "Encrypted · Mask preview only · Audit logged" : (has ? has.filename : "Click to upload or replace")}
+                  </div>
                 </div>
               </div>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0], dt.key)} />
+              {pct !== undefined && (
+                <div className="mt-3" data-testid={`doc-progress-${dt.key.replace(/\s+/g, "-").toLowerCase()}`}>
+                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-200 ${pct >= 100 ? "bg-emerald-500" : "bg-[#0A192F]"}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 flex justify-between">
+                    <span>{uploading ? "Uploading…" : pct >= 100 ? "Complete" : ""}</span>
+                    <span className="font-mono">{pct}%</span>
+                  </div>
+                </div>
+              )}
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0], dt.key)} disabled={uploading} />
             </label>
           );
         })}
-        {requireSSN && (
-          <label className="block rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 p-5 cursor-pointer" data-testid="doc-ssn">
-            <div className="flex items-center gap-3">
-              <Lock className="w-5 h-5 text-amber-700" />
-              <div>
-                <div className="font-medium text-[#0A192F]">SSN Document <span className="text-red-500">*</span></div>
-                <div className="text-xs text-amber-800">Encrypted · Mask preview only · Audit logged</div>
-              </div>
-            </div>
-            <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0], "SSN Document")} />
-          </label>
-        )}
       </div>
-      {uploading && <div className="mt-4 text-sm text-slate-500">Uploading…</div>}
     </div>
   );
 }
@@ -462,12 +499,11 @@ function Step8({ data, property, uploaded, onEdit }) {
       <ReviewBlock title="Personal" data={data.personal} editStep={0} onEdit={onEdit} />
       <ReviewBlock title="Contact & Address" data={data.contact} editStep={1} onEdit={onEdit} />
       <ReviewBlock title="Employment & Income" data={data.employment} editStep={2} onEdit={onEdit} />
-      <ReviewBlock title="Rental History" data={data.rental_history} editStep={3} onEdit={onEdit} />
-      <ReviewBlock title="Occupants & Pets" data={data.occupants} editStep={4} onEdit={onEdit} />
+      <ReviewBlock title="Occupants & Pets" data={data.occupants} editStep={3} onEdit={onEdit} />
       <div className="rs-card p-5">
         <div className="flex items-center justify-between mb-2">
           <div className="font-display font-semibold text-[#0A192F]">Documents Uploaded</div>
-          <button onClick={() => onEdit(6)} className="text-xs text-[#C5A880] font-semibold">Edit</button>
+          <button onClick={() => onEdit(5)} className="text-xs text-[#C5A880] font-semibold">Edit</button>
         </div>
         <ul className="text-sm text-slate-600 space-y-1.5">
           {uploaded.length === 0 ? <li className="text-slate-400">No documents uploaded</li> : uploaded.map((u, i) => (
