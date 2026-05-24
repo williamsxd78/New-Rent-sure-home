@@ -47,13 +47,19 @@ Create a professional, premium, trust-focused rental property application and te
 - ✅ Rich seed data: 12 properties, 3 sample reviews, 4 demo applications across decision states
 - ✅ Idempotent payment init (won't reset a paid application)
 
-## Implemented (Feb 2026 — current session)
-- ✅ **Bank Transfer (alternate payment)** — admin-configurable wire/ACH details (bank name, account name, account number, routing, address, instructions, contact email) in Admin → Settings → Bank Transfer. Applicants pick PayPal or Bank Transfer at payment step; bank transfers post a transaction reference and land in `pending_verification` for admin verification.
-- ✅ **Branded Confirmation PDF** (`reportlab`) — `GET /api/applications/{id}/confirmation-pdf?email=` returns a 1-page navy/gold receipt with applicant info, property, payment summary and "what happens next". Download button on Apply success step (Step 10) and on the Tracking page card after a successful track.
-- ✅ **CSV Export of applications** — `GET /api/admin/applications/export.csv` (Bearer, supports `?q=`). "Export CSV" button on /admin/applications.
-- ✅ **Support / Live Chat placeholder widget** — floating launcher on every public page with email & phone shortcuts plus a message form posting to `POST /api/contact` (stored in `db.support_messages`). Admin can list at `/api/admin/support-messages`. Wired for future live chat integration.
-- ✅ **Admin User Management (super_admin only)** — full CRUD UI at `/admin/users`. Roles: super_admin, manager, document_reviewer, support. Endpoints: `GET/POST/PATCH/DELETE /api/admin/users`. Guards: cannot delete self, cannot deactivate/demote self, cannot delete/deactivate/demote the last active super_admin, dup-email 409, weak-pw 400, invalid role 400. Login rejects `active=false`. Sidebar entry shown only for super_admins.
-- ✅ Verified by testing agent: 22/22 new endpoint tests pass + frontend smoke (Iteration 3 report).
+## Implemented (Feb 2026 — session 4)
+- ✅ **Apply-page step persistence** — refresh on any step keeps the user on the same step (localStorage `rs_apply_step_<pid>`) + `appResult` persisted so payment/success steps survive reload. Safety fallback: refreshing on success step without an active result drops back to Review.
+- ✅ **Slug-based property URLs** — every property auto-gets a slug like `south-end-loft-boston`. `/properties/<slug>` resolves the same as `/properties/<id>` (back-compat). Slug only regenerates on title/city change.
+- ✅ **Whole-card clickable property cards** — entire card navigates to the property's slug URL. View Details + Pre-Approval buttons still work and now also use the slug.
+- ✅ **Property image upload via Emergent Object Storage** — admin drag-and-drop multi-upload (JPG/PNG/WEBP, max 8MB), cover-image badge, ↑/↓ reorder, delete. Images are stored as `storage://...` refs and streamed via `GET /api/properties/{pid_or_slug}/images/{idx}` (with cache headers). External http(s) URLs are still supported with a safe-scheme 302 redirect.
+- ✅ **Per-document admin workflow** — each uploaded doc can be marked Verified / Rejected / Replacement Requested with a required reason. Audit log entry on every action. Applicants see the new "Document Review" section on `/track` with status pills and the admin's reason inline (yellow attention banner if any doc needs action).
+
+## Implemented (Feb 2026 — session 3)
+- ✅ Bank Transfer alternate payment (admin-configurable wire/ACH + Step 9 picker)
+- ✅ Branded confirmation PDF (`reportlab`) — download from Apply success + Tracking pages
+- ✅ CSV export of applications (`/api/admin/applications/export.csv`)
+- ✅ Support / Live Chat placeholder widget on every public page
+- ✅ Admin User Management CRUD (`/admin/users`, super_admin only, 4 roles, safety guards)
 
 ## Implemented (earlier in Feb 2026)
 - ✅ All backend endpoints (54/54 backend tests passing including 17 new for PayPal/SMTP integration)
@@ -71,14 +77,12 @@ Create a professional, premium, trust-focused rental property application and te
 - ✅ Rich seed data: 12 properties, 3 sample reviews, 4 demo applications across decision states
 
 ## Prioritized Backlog (remaining)
-- **P2** Per-document Admin "verified / rejected / request replacement" workflow UI
 - **P2** Adverse Action Notice generator with full template + send action
-- **P2** Property image uploads via storage (currently URL-only)
 - **P2** Saved-draft retrieval by email + magic link (currently local-storage only)
 - **P2** Map/location search on Properties page
-- **P2** Refactor: split `server.py` (~1230 lines) into `routers/` (admin_users, payments, public_contact, pdf, ...)
-- **P2** Refactor: split `ApplyPage.jsx` (~820 lines) into per-step components
-- **P2** Replace `/api/contact` raw dict with Pydantic `ContactIn` schema for stricter validation
+- **P2** Refactor: split `server.py` (~1340 lines) into `routers/` (admin_users, payments, public_contact, pdf, property_images, doc_review)
+- **P2** Refactor: split `ApplyPage.jsx` (~860 lines) into per-step components
+- **P2** Pydantic schemas for `/api/contact` and `PATCH /api/admin/applications/{id}/documents/{idx}` (stricter validation)
 - **P3** Multi-language (i18n)
 - **P3** Rate-limit on public `/api/contact` and `/api/applications/{id}/confirmation-pdf`
 

@@ -863,9 +863,11 @@ async def get_property_image(pid: str, idx: int):
         raise HTTPException(404, "Image not found")
     ref = imgs[idx]
     if not isinstance(ref, str) or not ref.startswith("storage://"):
-        # External URL — redirect
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(ref, status_code=302)
+        # External URL — redirect only if it's a safe http/https scheme
+        if isinstance(ref, str) and (ref.startswith("http://") or ref.startswith("https://")):
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(ref, status_code=302)
+        raise HTTPException(404, "Image not available")
     storage_path = ref[len("storage://"):]
     try:
         content, ctype = await asyncio.to_thread(get_object, storage_path)
