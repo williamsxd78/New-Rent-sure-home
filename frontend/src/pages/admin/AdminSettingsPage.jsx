@@ -225,6 +225,35 @@ export default function AdminSettingsPage() {
               {testResult.smtp.msg || "Sending…"}
             </div>
           )}
+
+          <div className="mt-7 pt-6 border-t border-slate-100">
+            <div className="font-display font-semibold text-[#0A192F] mb-1">Email templates</div>
+            <p className="text-sm text-slate-500 mb-4">Preview the HTML emails applicants receive at each milestone.</p>
+            <div className="flex flex-wrap gap-2" data-testid="email-template-previews">
+              {[
+                { key: "application_submitted", label: "Application Submitted" },
+                { key: "payment_received", label: "Payment Received" },
+                { key: "decision_approved", label: "Decision: Pre-Approved" },
+                { key: "decision_not_qualified", label: "Decision: Not Qualified" },
+                { key: "decision_more_info", label: "Decision: More Info Needed" },
+              ].map((t) => (
+                <button
+                  key={t.key}
+                  onClick={async () => {
+                    const r = await api.get(`/admin/email-templates/${t.key}/preview`, { responseType: "text" });
+                    const blob = new Blob([r.data], { type: "text/html" });
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, "_blank", "noopener,noreferrer");
+                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                  }}
+                  className="rs-btn-outline !py-1.5 !px-3 text-xs"
+                  data-testid={`preview-tpl-${t.key.replace(/_/g, "-")}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

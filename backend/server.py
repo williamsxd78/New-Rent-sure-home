@@ -28,7 +28,7 @@ from models import (
 from storage import init_storage, put_object, get_object, build_path, APP_NAME
 from seed import run_seed
 from paypal_client import PayPalClient, get_paypal_config, find_approve_url
-from email_service import send_templated, send_test_email as send_smtp_test
+from email_service import send_templated, send_test_email as send_smtp_test, preview_template
 from pdf_service import build_application_confirmation_pdf
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -243,11 +243,15 @@ async def create_application(payload: ApplicationCreate):
 
     # Fire-and-forget email (soft-fail if SMTP unconfigured)
     try:
+        origin = ""  # callsite has no request; defaults to https://rentsurehomes.com/track
+        submission_date = datetime.now(timezone.utc).strftime("%B %d, %Y · %I:%M %p UTC")
         await send_templated(db, "application_submitted", applicant_email, {
             "name": applicant_name,
             "property_name": prop.get("title", ""),
             "application_number": app_number,
-            "tracking_url": "",
+            "submission_date": submission_date,
+            "payment_status": "Pending",
+            "tracking_url": origin,
         })
     except Exception as e:
         logger.warning(f"Email failed: {e}")
@@ -1356,6 +1360,15 @@ async def admin_update_settings(settings: dict, admin=Depends(require_super_admi
     return _redact_settings(s)
 
 
+@api.get("/admin/email-templates/{template}/preview")
+async def admin_preview_email(template: str, admin=Depends(require_admin)):
+    """Render an email template with sample data so admins can preview before sending."""
+    if template not in {"application_submitted", "payment_received", "decision_approved", "decision_not_qualified", "decision_more_info"}:
+        raise HTTPException(404, "Unknown template")
+    rendered = preview_template(template)
+    return Response(content=rendered["html"], media_type="text/html")
+
+
 @api.post("/admin/settings/smtp/test")
 async def admin_smtp_test(to_email: str = Form(...), admin=Depends(require_admin)):
     ok, err = await send_smtp_test(db, to_email)
@@ -1377,6 +1390,18 @@ async def admin_paypal_test(admin=Depends(require_admin)):
         return {"status": "ok", **result}
     except Exception as e:
         raise HTTPException(400, f"PayPal test failed: {e}")
+
+
+# ------------------ Mount router ------------------
+app.include_router(api)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ------------------ Mount router ------------------
