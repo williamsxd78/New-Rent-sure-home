@@ -1,52 +1,70 @@
-import { useEffect } from "react";
+import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { AuthProvider } from "@/lib/auth";
+import { Toaster } from "@/components/ui/sonner";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+import HomePage from "@/pages/HomePage";
+import PropertiesPage from "@/pages/PropertiesPage";
+import PropertyDetailsPage from "@/pages/PropertyDetailsPage";
+import ApplyPage from "@/pages/ApplyPage";
+import TrackingPage from "@/pages/TrackingPage";
+import HowItWorksPage from "@/pages/HowItWorksPage";
+import AboutPage from "@/pages/AboutPage";
+import ContactPage from "@/pages/ContactPage";
+import ReviewsPage from "@/pages/ReviewsPage";
+import PolicyPage from "@/pages/PolicyPage";
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
+import AdminLoginPage from "@/pages/AdminLoginPage";
+import AdminLayout from "@/pages/admin/AdminLayout";
+import AdminDashboardPage from "@/pages/admin/AdminDashboardPage";
+import AdminPropertiesPage from "@/pages/admin/AdminPropertiesPage";
+import AdminApplicationsPage from "@/pages/admin/AdminApplicationsPage";
+import AdminPaymentsPage from "@/pages/admin/AdminPaymentsPage";
+import AdminReviewsPage from "@/pages/admin/AdminReviewsPage";
+import AdminRefundsPage from "@/pages/admin/AdminRefundsPage";
+import AdminAuditPage from "@/pages/admin/AdminAuditPage";
+import AdminSettingsPage from "@/pages/admin/AdminSettingsPage";
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
-
-  return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
-  );
-};
+const POLICIES = [
+  "privacy", "terms", "refund", "application-fee", "fair-housing",
+  "screening-disclosure", "fcra", "e-signature", "data-retention",
+];
 
 function App() {
   return (
     <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/properties" element={<PropertiesPage />} />
+            <Route path="/properties/:id" element={<PropertyDetailsPage />} />
+            <Route path="/apply/:propertyId" element={<ApplyPage />} />
+            <Route path="/track" element={<TrackingPage />} />
+            <Route path="/how-it-works" element={<HowItWorksPage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/contact" element={<ContactPage />} />
+            <Route path="/reviews" element={<ReviewsPage />} />
+            {POLICIES.map((slug) => (
+              <Route key={slug} path={`/policies/${slug}`} element={<PolicyPage slug={slug} />} />
+            ))}
+
+            <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<AdminDashboardPage />} />
+              <Route path="properties" element={<AdminPropertiesPage />} />
+              <Route path="applications" element={<AdminApplicationsPage />} />
+              <Route path="payments" element={<AdminPaymentsPage />} />
+              <Route path="reviews" element={<AdminReviewsPage />} />
+              <Route path="refunds" element={<AdminRefundsPage />} />
+              <Route path="audit" element={<AdminAuditPage />} />
+              <Route path="settings" element={<AdminSettingsPage />} />
+            </Route>
+          </Routes>
+          <Toaster position="top-right" />
+        </BrowserRouter>
+      </AuthProvider>
     </div>
   );
 }
