@@ -1,0 +1,83 @@
+{
+  "theme": "LIGHT",
+  "archetype": "Archetype 4: Swiss & High-Contrast (Premium Corporate Real Estate Variant)",
+  "color_palette": {
+    "primary": "#0A192F",
+    "primary_foreground": "#FFFFFF",
+    "secondary": "#C5A880",
+    "secondary_foreground": "#FFFFFF",
+    "background": "#FFFFFF",
+    "surface": "#F8F9FA",
+    "surface_border": "#E5E7EB",
+    "success": "#10B981",
+    "success_foreground": "#FFFFFF",
+    "danger": "#EF4444",
+    "danger_foreground": "#FFFFFF",
+    "muted": "#64748B",
+    "muted_foreground": "#F1F5F9"
+  },
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "DM Sans",
+    "h1": "text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-[#0A192F]",
+    "h2": "text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight text-[#0A192F]",
+    "h3": "text-xl sm:text-2xl font-semibold text-[#0A192F]",
+    "h4": "text-lg sm:text-xl font-medium text-[#0A192F]",
+    "body": "text-base leading-relaxed text-slate-600",
+    "small": "text-sm text-slate-500",
+    "overline": "text-xs font-bold uppercase tracking-[0.2em] text-slate-400"
+  },
+  "spacing_and_layout": {
+    "section_padding": "py-20 sm:py-24 lg:py-32",
+    "container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "grid_bento": "grid grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-6 lg:gap-8",
+    "grid_dashboard": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6",
+    "card_padding": "p-6 sm:p-8"
+  },
+  "components": {
+    "button_primary": "bg-[#0A192F] text-white hover:bg-[#112240] transition-colors rounded-lg px-6 py-3 font-medium shadow-sm hover:shadow-md",
+    "button_secondary": "bg-[#C5A880] text-white hover:bg-[#b09470] transition-colors rounded-lg px-6 py-3 font-medium shadow-sm hover:shadow-md",
+    "button_outline": "bg-transparent border border-slate-300 text-[#0A192F] hover:border-slate-400 hover:bg-slate-50 transition-colors rounded-lg px-6 py-3 font-medium",
+    "card": "bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(10,25,47,0.03)] hover:shadow-[0_8px_30px_rgba(10,25,47,0.06)] transition-shadow duration-300",
+    "badge_success": "bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full text-xs font-semibold",
+    "badge_danger": "bg-red-50 text-red-700 border border-red-200 px-3 py-1 rounded-full text-xs font-semibold",
+    "input": "w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 focus:border-[#0A192F] focus:ring-2 focus:ring-[#0A192F]/20 focus:outline-none transition-all",
+    "glass_header": "bg-white/80 backdrop-blur-xl border-b border-slate-200/50 sticky top-0 z-50",
+    "success_card": "bg-emerald-50 border-2 border-emerald-500 rounded-2xl p-8 text-center shadow-[0_8px_30px_rgba(16,185,129,0.15)]",
+    "not_qualified_watermark": "absolute inset-0 flex items-center justify-center pointer-events-none z-10 overflow-hidden"
+  },
+  "interactions": {
+    "hover_state": "opacity-90 transform -translate-y-0.5 transition-all duration-200",
+    "focus_state": "ring-2 ring-offset-2 ring-[#0A192F]",
+    "page_transition": "animate-in fade-in slide-in-from-bottom-4 duration-500"
+  },
+  "media": {
+    "hero_image": "https://images.unsplash.com/photo-1613490493576-7fde63acd811?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjBsdXh1cnklMjBob3VzZSUyMGV4dGVyaW9yfGVufDB8fHx8MTc3OTYxNTAyOHww&ixlib=rb-4.1.0&q=85",
+    "property_interiors": [
+      "https://images.unsplash.com/photo-1600494448850-6013c64ba722?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHxwcmVtaXVtJTIwYXBhcnRtZW50JTIwaW50ZXJpb3IlMjBsaXZpbmclMjByb29tfGVufDB8fHx8MTc3OTYxNTAyOHww&ixlib=rb-4.1.0&q=85",
+      "https://images.unsplash.com/photo-1688646953306-5ec93eab8c06?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwzfHxwcmVtaXVtJTIwYXBhcnRtZW50JTIwaW50ZXJpb3IlMjBsaXZpbmclMjByb29tfGVufDB8fHx8MTc3OTYxNTAyOHww&ixlib=rb-4.1.0&q=85",
+      "https://images.pexels.com/photos/8082229/pexels-photo-8082229.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    ],
+    "property_exteriors": [
+      "https://images.unsplash.com/photo-1628012209120-d9db7abf7eab?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHw0fHxtb2Rlcm4lMjBsdXh1cnklMjBob3VzZSUyMGV4dGVyaW9yfGVufDB8fHx8MTc3OTYxNTAyOHww&ixlib=rb-4.1.0&q=85",
+      "https://images.pexels.com/photos/8134846/pexels-photo-8134846.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    ],
+    "testimonial_family": "https://images.unsplash.com/photo-1758523671893-0ba21cf4260f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwzfHxoYXBweSUyMGZhbWlseSUyMG1vdmluZyUyMGludG8lMjBuZXclMjBob21lfGVufDB8fHx8MTc3OTYxNTAyOHww&ixlib=rb-4.1.0&q=85",
+    "badges": {
+      "verified_listing": "https://static.prod-images.emergentagent.com/jobs/e70ac85e-1b6c-4af3-b12f-3d64d20e2751/images/ec8961c4cca91018aa9f24029424bf034863539c46aceaa207f2385b453b3b45.png",
+      "secure_data": "https://static.prod-images.emergentagent.com/jobs/e70ac85e-1b6c-4af3-b12f-3d64d20e2751/images/bc023ceed360ec54a50fee8e65492b43a6e28fa6cb56475ca2fc484bef928a08.png"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Install lucide-react for icons.",
+    "Use standard Tailwind CSS utility classes.",
+    "Ensure all interactive components (buttons, links, inputs) have a 'data-testid' attribute in kebab-case representing their role.",
+    "For the 'NOT QUALIFIED' watermark, render a large rotated text block with opacity (e.g., text-red-500/20 text-9xl font-bold -rotate-12 pointer-events-none) overlaid on the content area.",
+    "For the SSN handling notice, visibly integrate the secure_data badge image next to the file upload or input field to build trust.",
+    "Admin dashboard should utilize a compact layout with a sidebar (w-64) and a main content area. Use the 'glass_header' class for sticky navs if required.",
+    "Property detail page must feature an immersive image gallery utilizing the provided interior/exterior images.",
+    "Use the verified_listing badge on property cards to establish trust.",
+    "Implement the multi-step form with clear visual progression (stepper/progress bar) using the brand's navy or gold color for completed steps.",
+    "Apply fonts Outfit for Headings and DM Sans for Body by including them in index.css using @import from Google Fonts."
+  ]
+}
