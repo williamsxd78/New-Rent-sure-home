@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
 import { api, STAGE_LABELS, DECISION_LABELS, downloadConfirmationPdf } from "@/lib/api";
-import { Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare, Info, Download } from "lucide-react";
+import { Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare, Info, Download, FileWarning, ShieldCheck } from "lucide-react";
 
 const ICONS = {
   completed: CheckCircle2,
@@ -173,12 +173,56 @@ function TrackingResult({ data }) {
         </div>
       </div>
 
+      <DocumentStatusList docs={data.documents || []} />
+
       <div className="mt-6 grid sm:grid-cols-2 gap-4">
         <div className="rs-card p-5 flex items-center gap-3"><Mail className="w-5 h-5 text-[#C5A880]" /><div><div className="text-xs text-slate-500">Email</div><div className="text-sm text-[#0A192F]">{data.applicant_email}</div></div></div>
         <div className="rs-card p-5 flex items-center gap-3"><MessageSquare className="w-5 h-5 text-[#C5A880]" /><div><div className="text-xs text-slate-500">Messages</div><div className="text-sm text-[#0A192F]">{data.messages?.length || 0} from admin</div></div></div>
       </div>
 
       <DownloadConfirmation appNumber={data.application_number} email={data.applicant_email} />
+    </div>
+  );
+}
+
+function DocumentStatusList({ docs }) {
+  if (!docs || docs.length === 0) return null;
+  const flagged = docs.filter((d) => d.status === "rejected" || d.status === "replacement_requested");
+
+  return (
+    <div className="mt-6 rs-card p-7" data-testid="doc-status-list">
+      <h3 className="font-display text-xl font-semibold text-[#0A192F] mb-2">Document Review</h3>
+      {flagged.length > 0 && (
+        <div className="mb-4 p-4 rounded-xl border border-amber-200 bg-amber-50 flex items-start gap-3" data-testid="docs-attention-notice">
+          <FileWarning className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <div className="font-semibold text-amber-900">{flagged.length} document{flagged.length > 1 ? "s need" : " needs"} your attention</div>
+            <div className="text-amber-800 mt-0.5">Please review the reasons below and email us replacement file(s).</div>
+          </div>
+        </div>
+      )}
+      <div className="space-y-2">
+        {docs.map((d, i) => {
+          const cfg = ({
+            verified: { label: "Verified", cls: "text-emerald-700 bg-emerald-50 border-emerald-200", Icon: ShieldCheck },
+            rejected: { label: "Rejected", cls: "text-red-700 bg-red-50 border-red-200", Icon: AlertTriangle },
+            replacement_requested: { label: "Replacement Requested", cls: "text-amber-700 bg-amber-50 border-amber-200", Icon: FileWarning },
+          })[d.status] || { label: "Under Review", cls: "text-slate-600 bg-slate-50 border-slate-200", Icon: Clock };
+          const Icon = cfg.Icon;
+          return (
+            <div key={i} className={`flex items-start gap-3 p-3 rounded-lg border ${cfg.cls}`} data-testid={`tracking-doc-${i}`}>
+              <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-[#0A192F]">{d.type}</div>
+                {d.review_reason && (d.status === "rejected" || d.status === "replacement_requested") && (
+                  <div className="text-xs mt-1 opacity-90"><strong>Reason:</strong> {d.review_reason}</div>
+                )}
+              </div>
+              <span className="text-[10px] uppercase tracking-wider font-semibold whitespace-nowrap">{cfg.label}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -1,14 +1,33 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { MapPin, Bed, Bath, Maximize, Calendar, BadgeCheck } from "lucide-react";
-import { formatMoney } from "@/lib/api";
+import { formatMoney, resolvePropertyImage } from "@/lib/api";
 
 export default function PropertyCard({ p }) {
+  const navigate = useNavigate();
+  // Use slug if available, fall back to id for backward compatibility
+  const detailHref = `/properties/${p.slug || p.id}`;
+  const applyHref = `/apply/${p.slug || p.id}`;
+
+  // Whole card is clickable; nested links/buttons stop propagation.
+  const handleCardClick = (e) => {
+    if (e.target.closest("[data-no-card-link]")) return;
+    navigate(detailHref);
+  };
+
   return (
-    <div className="rs-card overflow-hidden flex flex-col" data-testid={`property-card-${p.id}`}>
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={handleCardClick}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(detailHref); } }}
+      className="rs-card overflow-hidden flex flex-col cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-[#C5A880]/60"
+      data-testid={`property-card-${p.id}`}
+      aria-label={`View details for ${p.title}`}
+    >
       <div className="relative aspect-[4/3] overflow-hidden">
         <img
-          src={p.images?.[0]}
+          src={resolvePropertyImage(p, 0)}
           alt={p.title}
           className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
         />
@@ -39,11 +58,11 @@ export default function PropertyCard({ p }) {
             <Calendar className="w-3.5 h-3.5" /> Available {p.availability_date}
           </div>
         )}
-        <div className="mt-5 flex items-center gap-2">
-          <Link to={`/properties/${p.id}`} className="rs-btn-outline flex-1 !py-2 text-sm" data-testid={`property-view-${p.id}`}>
+        <div className="mt-5 flex items-center gap-2" data-no-card-link>
+          <Link to={detailHref} className="rs-btn-outline flex-1 !py-2 text-sm" data-testid={`property-view-${p.id}`}>
             View Details
           </Link>
-          <Link to={`/apply/${p.id}`} className="rs-btn-primary flex-1 !py-2 text-sm" data-testid={`property-apply-${p.id}`}>
+          <Link to={applyHref} className="rs-btn-primary flex-1 !py-2 text-sm" data-testid={`property-apply-${p.id}`}>
             Pre-Approval
           </Link>
         </div>

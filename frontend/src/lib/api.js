@@ -3,6 +3,21 @@ import axios from "axios";
 export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API = `${BACKEND_URL}/api`;
 
+/**
+ * Resolve a property image entry to a usable URL.
+ * - "storage://..." references are streamed through our /api proxy
+ * - external https/http URLs are returned as-is
+ */
+export const resolvePropertyImage = (property, idx = 0) => {
+  if (!property?.images || property.images.length === 0) return "";
+  const ref = property.images[idx];
+  if (!ref) return "";
+  if (typeof ref === "string" && ref.startsWith("storage://")) {
+    return `${API}/properties/${property.slug || property.id}/images/${idx}`;
+  }
+  return ref;
+};
+
 export const api = axios.create({ baseURL: API });
 
 api.interceptors.request.use((config) => {

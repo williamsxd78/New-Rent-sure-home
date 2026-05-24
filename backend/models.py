@@ -44,6 +44,7 @@ class PropertyIn(BaseModel):
     owner_name: str = ""
     broker_name: str = ""
     internal_notes: str = ""
+    slug: str = ""  # auto-generated on save
 
 
 class Property(PropertyIn):

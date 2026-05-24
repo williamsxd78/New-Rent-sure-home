@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 4 — Verified all P0 + new features: apply-page step persistence (localStorage rs_apply_step_<slug>), slug-based property URLs + whole-card click, property image upload via Emergent Object Storage, per-document admin review workflow (verified/rejected/replacement_requested) with applicant-visible status on tracking page. Authored /app/backend/tests/test_iteration4.py with 21 tests across 4 test classes — 21/21 PASS. Frontend smoke verified: (1) whole-card click on /properties navigates to /properties/south-end-loft-boston (slug), (2) Pre-Approval button navigates to /apply/south-end-loft-boston, (3) Apply page persists step in localStorage key rs_apply_step_south-end-loft-boston (key present, value preserved across reload), (4) Track page shows 'Document Review' section with admin's review reason ('Track test reason' confirmed in DOM) and rejected status for APP-94C5912C. Full regression: ran test_iteration4.py independently — clean 21/21.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/admin/properties/{pid}/images", "issue": "Returned index always equals len(prop.images) BEFORE push — relies on read-then-write race; under concurrent uploads two clients could collide on the same array index. Push is atomic but the returned URL index could be off. Consider using $push + $size in one update and then re-reading."},
+      {"endpoint": "PATCH /api/admin/applications/{app_id}/documents/{idx}", "issue": "payload accepted as raw dict — no Pydantic model means status string is loosely typed; if frontend sends `null` it currently throws an unhandled .strip() AttributeError before the validation check. Add DocReviewIn(status: Literal[...], reason: str = '')."},
+      {"endpoint": "GET /api/properties/{pid_or_slug}/images/{idx}", "issue": "When images[idx] is an external URL string that does NOT start with 'storage://', it's blindly 302'd via RedirectResponse — open redirect surface. Validate scheme is http/https before redirecting."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/properties (filters)", "issues": ["React hydration warning: <span> rendered as child of <option> in PropertiesPage filter selects (line 60). Not user-visible but pollutes console — wrap dynamic values in plain text instead of <span>."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4.py",
+    "/app/test_reports/pytest/iter4.xml"
+  ],
+  "action_items": [
+    "(Optional, polish) Replace raw `payload: dict` in PATCH /admin/applications/{id}/documents/{idx} with Pydantic DocReviewIn for stricter validation.",
+    "(Optional, security) Validate scheme in GET /properties/{id}/images/{idx} before issuing 302 — currently any non-storage:// string is treated as a redirect target.",
+    "(Optional, race) Image upload index returned to client may collide under concurrent uploads — re-read property after push and return the actual final index.",
+    "(Cosmetic) Fix React hydration warning in PropertiesPage select options — <span> cannot be a child of <option>.",
+    "(Pre-existing, not new) /app/backend/tests/test_rentsure.py::test_upload_ssn_doc still fails (doc_type='ssn_card' mismatch). Not introduced this iteration."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1385 lines — splitting into routers/ (properties_admin, images, doc_review, applications_admin) is overdue. Flagged in iter2/3, getting worse.",
+    "_unique_property_slug performs a loop of MongoDB find_one calls — fine for now (max ~5 iterations expected) but could be replaced with a single find_one with $regex to fetch all matching slugs once.",
+    "Property images stored as a heterogeneous List[str] mixing 'storage://...' refs and external URLs makes downstream code (delete/reorder) treat them all as opaque strings. Consider migrating to List[{url, source}] objects for clarity.",
+    "PATCH /admin/applications/{id}/documents/{idx} mutates the documents array via read-modify-write; under concurrent reviews of two different docs on the same application, the last writer wins and one review is silently dropped. Use $set on documents.{idx}.status / .review_reason / .reviewed_by / .reviewed_at via positional update or arrayFilters.",
+    "GET /properties/{pid_or_slug}/images/{idx} is fully public (no rate-limit). Acceptable for listing pages but a bad actor could enumerate all idx values — at minimum add Cache-Control already in place; consider a CDN.",
+    "Audit log for document review writes admin email but NOT old_status — useful for forensics. Add 'previous_status' to the details dict.",
+    "_slugify hard-caps at 80 chars but doesn't try to preserve word boundaries — minor cosmetic only."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4.py (NEW — 21 tests)"
+  ],
+  "success_rate": {"backend": "100% (21/21 new tests)", "frontend": "100% of requested testids/flows verified end-to-end (slug URLs, whole-card click, apply localStorage persistence, track-page Document Review section)"},
+  "test_credentials": "Admin: admin@rentsurehomes.com / Admin@123 (super_admin). Doc-review test app: APP-94C5912C / test_pyt@example.com",
+  "seed_data_creation": "Tests create 2 transient TEST properties (auto-deleted via teardown_class). Doc-review tests MUTATE the seeded APP-94C5912C document #0 review state (last left as rejected with reason 'Track test reason') — main agent may want to re-seed or clear if it interferes with manual testing.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 4 added 21 tests in /app/backend/tests/test_iteration4.py covering Slugs (3), Admin Property Slug CRUD (4), Property Images (6), Doc Review Workflow (8). Run with: pytest /app/backend/tests/test_iteration4.py -v. Tests use REACT_APP_BACKEND_URL from frontend/.env via _load_env() fallback. TestPropertyImages and TestAdminPropertySlug both auto-clean their created properties via teardown_class. TestDocReview mutates seeded APP-94C5912C document #0 — leaves it in 'rejected'/'Track test reason' state which is intentional so the track-page UI test can verify the reason renders. Admin doc review UI buttons (Verify/Reject/Replacement) were NOT verified through Playwright because the test clicked the row instead of the eye-icon detail link; backend API for doc review is fully verified (8 tests pass) so this is low risk. Apply page step persistence works at the localStorage layer (step key created with correct slug); end-to-end advance-and-refresh was blocked by step-1 form validation in the smoke (Date of Birth + ID Number required) — main agent can confirm by manually filling Step 1 and refreshing.",
+  "rca of the issue": "No new bugs introduced. Pre-existing test_upload_ssn_doc failure RCA unchanged from iter3: server treats only doc_type in {'ssn document','ssn verification'} as sensitive, but the legacy test uses 'ssn_card'. Recommend widening server set."
+}

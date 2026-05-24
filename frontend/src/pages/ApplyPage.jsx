@@ -62,12 +62,20 @@ export default function ApplyPage() {
   const { propertyId } = useParams();
   const navigate = useNavigate();
   const [property, setProperty] = useState(null);
-  const [step, setStep] = useState(0);
+  const [step, setStep] = useState(() => {
+    const saved = parseInt(localStorage.getItem(`rs_apply_step_${propertyId}`) || "0", 10);
+    return Number.isFinite(saved) && saved >= 0 && saved < STEPS.length ? saved : 0;
+  });
   const [data, setData] = useState(() => {
     const saved = localStorage.getItem(`rs_apply_${propertyId}`);
     return saved ? JSON.parse(saved) : blank;
   });
-  const [appResult, setAppResult] = useState(null); // {id, application_number, application_fee}
+  const [appResult, setAppResult] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`rs_pp_state_${propertyId}`);
+      return raw ? (JSON.parse(raw) || null) : null;
+    } catch { return null; }
+  });
   const [paymentDone, setPaymentDone] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState(""); // "paypal" or "bank_transfer"
   const [bankInfo, setBankInfo] = useState(null);
@@ -85,6 +93,28 @@ export default function ApplyPage() {
   useEffect(() => { api.get("/payments/bank-info").then((r) => setBankInfo(r.data)).catch(() => setBankInfo({ enabled: false })); }, []);
 
   useEffect(() => { localStorage.setItem(`rs_apply_${propertyId}`, JSON.stringify(data)); }, [data, propertyId]);
+
+  // Persist current step across refreshes (do not save the "success" step — that requires submission state).
+  useEffect(() => {
+    if (step < STEPS.length - 1) {
+      localStorage.setItem(`rs_apply_step_${propertyId}`, String(step));
+    }
+  }, [step, propertyId]);
+
+  // Persist appResult so payment / success steps survive refresh.
+  useEffect(() => {
+    if (appResult?.id) {
+      localStorage.setItem(`rs_pp_state_${propertyId}`, JSON.stringify(appResult));
+    }
+  }, [appResult, propertyId]);
+
+  // Safety: if user refreshes onto success step but lost appResult, bump them back to review.
+  useEffect(() => {
+    if (step === STEPS.length - 1 && !appResult?.application_number) {
+      setStep(6);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const update = (section, field, value) => setData((d) => ({ ...d, [section]: { ...d[section], [field]: value } }));
   const setTop = (field, value) => setData((d) => ({ ...d, [field]: value }));
@@ -236,6 +266,7 @@ export default function ApplyPage() {
   const finalSubmit = () => {
     setConfirmOpen(false);
     localStorage.removeItem(`rs_apply_${propertyId}`);
+    localStorage.removeItem(`rs_apply_step_${propertyId}`);
     setStep(8);
   };
 

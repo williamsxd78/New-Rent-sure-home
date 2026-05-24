@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 import os
+import re
 import uuid
 import asyncio
 import logging
@@ -48,6 +49,29 @@ def _clean(doc):
     return doc
 
 
+def _slugify(s: str) -> str:
+    """Generate a URL-safe slug from a string."""
+    s = (s or "").lower().strip()
+    s = re.sub(r"[^a-z0-9\s-]", "", s)
+    s = re.sub(r"[\s_-]+", "-", s)
+    return s.strip("-")[:80] or "property"
+
+
+async def _unique_property_slug(db, base: str, exclude_id: Optional[str] = None) -> str:
+    """Return a slug unique within the properties collection."""
+    slug = base
+    i = 2
+    while True:
+        q = {"slug": slug}
+        if exclude_id:
+            q["id"] = {"$ne": exclude_id}
+        if not await db.properties.find_one(q, {"_id": 1}):
+            return slug
+        slug = f"{base}-{i}"
+        i += 1
+
+
+
 def _mask_ssn_doc_path(app_doc: dict, role: str) -> dict:
     """For non super-admin viewers, remove the full SSN doc path & mask SSN."""
     if role != "super_admin":
@@ -66,10 +90,16 @@ async def startup():
         await db.applications.create_index("application_number")
         await db.applications.create_index("applicant_email")
         await db.properties.create_index("city")
+        await db.properties.create_index("slug")
         await db.audit_logs.create_index("created_at")
     except Exception as e:
         logger.warning(f"Index creation: {e}")
     await run_seed(db)
+    # Backfill: ensure every property has a slug (for older seed data)
+    async for p in db.properties.find({"$or": [{"slug": {"$exists": False}}, {"slug": ""}]}, {"_id": 0, "id": 1, "title": 1, "city": 1}):
+        base = _slugify(f"{p.get('title','')} {p.get('city','')}")
+        slug = await _unique_property_slug(db, base, exclude_id=p["id"])
+        await db.properties.update_one({"id": p["id"]}, {"$set": {"slug": slug}})
     logger.info("Seed complete")
 
 
@@ -125,9 +155,10 @@ async def list_properties(
     return items
 
 
-@api.get("/properties/{pid}")
-async def get_property(pid: str):
-    p = await db.properties.find_one({"id": pid}, {"_id": 0})
+@api.get("/properties/{pid_or_slug}")
+async def get_property(pid_or_slug: str):
+    """Resolve either by UUID id or by slug, for clean shareable URLs."""
+    p = await db.properties.find_one({"$or": [{"id": pid_or_slug}, {"slug": pid_or_slug}]}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Property not found")
     return p
@@ -758,6 +789,7 @@ async def admin_list_properties(admin=Depends(require_admin)):
 async def admin_create_property(p: PropertyIn, admin=Depends(require_admin)):
     doc = p.model_dump()
     doc["id"] = str(uuid.uuid4())
+    doc["slug"] = await _unique_property_slug(db, _slugify(f"{doc.get('title','')} {doc.get('city','')}"))
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["updated_at"] = doc["created_at"]
     await db.properties.insert_one(doc)
@@ -767,11 +799,19 @@ async def admin_create_property(p: PropertyIn, admin=Depends(require_admin)):
 
 @api.put("/admin/properties/{pid}")
 async def admin_update_property(pid: str, p: PropertyIn, admin=Depends(require_admin)):
-    update = p.model_dump()
-    update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    res = await db.properties.update_one({"id": pid}, {"$set": update})
-    if res.matched_count == 0:
+    existing = await db.properties.find_one({"id": pid}, {"_id": 0})
+    if not existing:
         raise HTTPException(404, "Property not found")
+    update = p.model_dump()
+    # Only regenerate slug if title or city changed (preserves shareable links)
+    if update.get("title") != existing.get("title") or update.get("city") != existing.get("city") or not existing.get("slug"):
+        update["slug"] = await _unique_property_slug(
+            db, _slugify(f"{update.get('title','')} {update.get('city','')}"), exclude_id=pid
+        )
+    else:
+        update["slug"] = existing["slug"]
+    update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db.properties.update_one({"id": pid}, {"$set": update})
     doc = await db.properties.find_one({"id": pid}, {"_id": 0})
     return doc
 
@@ -782,6 +822,84 @@ async def admin_delete_property(pid: str, admin=Depends(require_admin)):
     if res.deleted_count == 0:
         raise HTTPException(404, "Property not found")
     return {"status": "deleted"}
+
+
+# ------------------ Admin: Property Images ------------------
+@api.post("/admin/properties/{pid}/images")
+async def admin_upload_property_image(pid: str, file: UploadFile = File(...), admin=Depends(require_admin)):
+    prop = await db.properties.find_one({"id": pid}, {"_id": 0})
+    if not prop:
+        raise HTTPException(404, "Property not found")
+    ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg").lower()
+    if ext not in {"jpg", "jpeg", "png", "webp"}:
+        raise HTTPException(400, "Only JPG, PNG, WEBP accepted")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Image too large (max 8MB)")
+    path = build_path("properties", pid, ext)
+    try:
+        await asyncio.to_thread(put_object, path, data, file.content_type or "image/jpeg")
+    except Exception as e:
+        raise HTTPException(500, f"Storage upload failed: {e}")
+    # Public viewer URL through our proxy
+    url = f"/api/properties/{pid}/images/{len(prop.get('images', []))}"
+    # Persist as object storage path (use a marker so we know to proxy it); we store the storage path
+    storage_ref = f"storage://{path}"
+    await db.properties.update_one(
+        {"id": pid},
+        {"$push": {"images": storage_ref}, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"index": len(prop.get("images", [])), "url": url, "storage_ref": storage_ref}
+
+
+@api.get("/properties/{pid}/images/{idx}")
+async def get_property_image(pid: str, idx: int):
+    """Public endpoint that streams an uploaded property image from storage."""
+    prop = await db.properties.find_one({"$or": [{"id": pid}, {"slug": pid}]}, {"_id": 0, "images": 1})
+    if not prop:
+        raise HTTPException(404, "Property not found")
+    imgs = prop.get("images") or []
+    if idx < 0 or idx >= len(imgs):
+        raise HTTPException(404, "Image not found")
+    ref = imgs[idx]
+    if not isinstance(ref, str) or not ref.startswith("storage://"):
+        # External URL — redirect
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(ref, status_code=302)
+    storage_path = ref[len("storage://"):]
+    try:
+        content, ctype = await asyncio.to_thread(get_object, storage_path)
+    except Exception:
+        raise HTTPException(404, "Image not available")
+    return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=3600"})
+
+
+@api.delete("/admin/properties/{pid}/images/{idx}")
+async def admin_delete_property_image(pid: str, idx: int, admin=Depends(require_admin)):
+    prop = await db.properties.find_one({"id": pid}, {"_id": 0})
+    if not prop:
+        raise HTTPException(404, "Property not found")
+    imgs = list(prop.get("images") or [])
+    if idx < 0 or idx >= len(imgs):
+        raise HTTPException(404, "Image index out of range")
+    imgs.pop(idx)
+    await db.properties.update_one({"id": pid}, {"$set": {"images": imgs, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"images": imgs}
+
+
+@api.patch("/admin/properties/{pid}/images/reorder")
+async def admin_reorder_property_images(pid: str, payload: dict, admin=Depends(require_admin)):
+    """payload: {order: [<index>, <index>, ...]}"""
+    prop = await db.properties.find_one({"id": pid}, {"_id": 0})
+    if not prop:
+        raise HTTPException(404, "Property not found")
+    imgs = list(prop.get("images") or [])
+    order = payload.get("order") or []
+    if sorted(order) != list(range(len(imgs))):
+        raise HTTPException(400, "Order must be a permutation of all existing image indices")
+    new_imgs = [imgs[i] for i in order]
+    await db.properties.update_one({"id": pid}, {"$set": {"images": new_imgs, "updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"images": new_imgs}
 
 
 # ------------------ Admin: Applications ------------------
@@ -907,6 +1025,47 @@ async def admin_update_screening(app_id: str, payload: ScreeningUpdate, admin=De
         {"id": app_id}, {"$set": {"screening": screening, "timeline": timeline, "updated_at": now}}
     )
     return {"status": "ok"}
+
+
+DOC_STATUSES = {"uploaded", "verified", "rejected", "replacement_requested"}
+
+
+@api.patch("/admin/applications/{app_id}/documents/{idx}")
+async def admin_review_document(app_id: str, idx: int, payload: dict, admin=Depends(require_admin)):
+    """Admin updates the review status of a single uploaded document."""
+    status = (payload.get("status") or "").strip()
+    if status not in DOC_STATUSES:
+        raise HTTPException(400, f"Invalid status. Must be one of: {sorted(DOC_STATUSES)}")
+    reason = (payload.get("reason") or "").strip()
+    if status in ("rejected", "replacement_requested") and not reason:
+        raise HTTPException(400, "A reason is required when rejecting or requesting replacement")
+
+    a = await db.applications.find_one({"id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Application not found")
+    docs = list(a.get("documents") or [])
+    if idx < 0 or idx >= len(docs):
+        raise HTTPException(404, "Document index out of range")
+    now = datetime.now(timezone.utc).isoformat()
+    docs[idx] = {
+        **docs[idx],
+        "status": status,
+        "review_reason": reason,
+        "reviewed_by": admin["email"],
+        "reviewed_at": now,
+    }
+    await db.applications.update_one({"id": app_id}, {"$set": {"documents": docs, "updated_at": now}})
+
+    # Audit log
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "admin_email": admin["email"],
+        "action": f"document_{status}",
+        "application_id": app_id,
+        "details": {"doc_index": idx, "doc_type": docs[idx].get("type"), "reason": reason},
+        "created_at": now,
+    })
+    return docs[idx]
 
 
 @api.post("/admin/applications/{app_id}/decision")

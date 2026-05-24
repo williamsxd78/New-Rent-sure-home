@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
-import { api, formatMoney } from "@/lib/api";
+import { api, formatMoney, resolvePropertyImage } from "@/lib/api";
 import {
   MapPin, Bed, Bath, Maximize, Calendar, Car, Zap, PawPrint, FileText,
   ShieldCheck, BadgeCheck, AlertCircle, CircleDollarSign, Lock,
@@ -24,7 +24,7 @@ export default function PropertyDetailsPage() {
         {/* Gallery */}
         <div className="mt-6 grid lg:grid-cols-4 gap-3" data-testid="property-gallery">
           <div className="lg:col-span-3 aspect-[16/10] rounded-2xl overflow-hidden bg-slate-100">
-            <img src={p.images?.[active]} alt={p.title} className="w-full h-full object-cover" />
+            <img src={resolvePropertyImage(p, active)} alt={p.title} className="w-full h-full object-cover" />
           </div>
           <div className="grid grid-cols-3 lg:grid-cols-1 gap-3">
             {(p.images || []).map((img, i) => (
@@ -34,7 +34,7 @@ export default function PropertyDetailsPage() {
                 className={`aspect-[4/3] rounded-xl overflow-hidden border-2 transition ${active === i ? "border-[#0A192F]" : "border-transparent"}`}
                 data-testid={`gallery-thumb-${i}`}
               >
-                <img src={img} alt="" className="w-full h-full object-cover" />
+                <img src={resolvePropertyImage(p, i)} alt="" className="w-full h-full object-cover" />
               </button>
             ))}
           </div>
@@ -128,7 +128,7 @@ export default function PropertyDetailsPage() {
                 <div className="flex justify-between"><span>Application fee</span><span className="font-medium text-[#0A192F]">{formatMoney(p.application_fee)}</span></div>
                 <div className="flex justify-between"><span>Required income</span><span className="font-medium text-[#0A192F]">{formatMoney(p.required_income)}/mo</span></div>
               </div>
-              <Link to={`/apply/${p.id}`} className="rs-btn-primary w-full mt-6" data-testid="apply-cta">
+              <Link to={`/apply/${p.slug || p.id}`} className="rs-btn-primary w-full mt-6" data-testid="apply-cta">
                 <CircleDollarSign className="w-4 h-4" /> Start Pre-Approval
               </Link>
               <div className="mt-5 pt-5 border-t border-slate-100 space-y-2.5 text-xs text-slate-500">

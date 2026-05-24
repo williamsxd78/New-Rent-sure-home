@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
-import { api, formatMoney } from "@/lib/api";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import React, { useEffect, useState, useRef } from "react";
+import { api, formatMoney, resolvePropertyImage } from "@/lib/api";
+import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2 } from "lucide-react";
 
 const BLANK = {
   title: "", property_type: "Apartment", address: "", city: "", state: "", zip_code: "",
@@ -26,13 +26,20 @@ export default function AdminPropertiesPage() {
     if (typeof payload.amenities === "string") payload.amenities = payload.amenities.split(",").map((s) => s.trim()).filter(Boolean);
     if (typeof payload.tags === "string") payload.tags = payload.tags.split(",").map((s) => s.trim()).filter(Boolean);
     if (typeof payload.images === "string") payload.images = payload.images.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!Array.isArray(payload.images)) payload.images = [];
     if (typeof payload.required_documents === "string") payload.required_documents = payload.required_documents.split("\n").map((s) => s.trim()).filter(Boolean);
     payload.rent = Number(payload.rent); payload.deposit = Number(payload.deposit); payload.application_fee = Number(payload.application_fee);
     payload.bedrooms = Number(payload.bedrooms); payload.bathrooms = Number(payload.bathrooms);
     payload.square_feet = Number(payload.square_feet); payload.required_income = Number(payload.required_income);
-    if (editing.id) await api.put(`/admin/properties/${editing.id}`, payload);
-    else await api.post("/admin/properties", payload);
-    setEditing(null); load();
+    if (editing.id) {
+      await api.put(`/admin/properties/${editing.id}`, payload);
+      setEditing(null); load();
+    } else {
+      const r = await api.post("/admin/properties", payload);
+      // Keep modal open so admin can upload images now that we have an id
+      setEditing(r.data);
+      load();
+    }
   };
 
   const remove = async (id) => {
@@ -107,7 +114,24 @@ export default function AdminPropertiesPage() {
               <div className="sm:col-span-2"><label className="rs-label">Description</label><textarea rows={3} className="rs-input" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></div>
               <div className="sm:col-span-2"><label className="rs-label">Amenities (comma-separated)</label><input className="rs-input" value={arrToStr(editing.amenities)} onChange={(e) => setEditing({ ...editing, amenities: e.target.value })} /></div>
               <div className="sm:col-span-2"><label className="rs-label">Tags (comma-separated)</label><input className="rs-input" value={arrToStr(editing.tags)} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></div>
-              <div className="sm:col-span-2"><label className="rs-label">Image URLs (comma-separated)</label><input className="rs-input" value={arrToStr(editing.images)} onChange={(e) => setEditing({ ...editing, images: e.target.value })} /></div>
+              <div className="sm:col-span-2"><label className="rs-label">External Image URLs (optional, comma-separated)</label><input className="rs-input" value={arrToStr(editing.images?.filter?.((x) => typeof x === "string" && !x.startsWith("storage://")) || editing.images)} onChange={(e) => {
+                const externals = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
+                const storedOnly = (editing.images || []).filter((x) => typeof x === "string" && x.startsWith("storage://"));
+                setEditing({ ...editing, images: [...storedOnly, ...externals] });
+              }} /></div>
+              {editing.id ? (
+                <div className="sm:col-span-2">
+                  <label className="rs-label">Uploaded Images</label>
+                  <PropertyImageManager
+                    property={editing}
+                    onChange={(images) => setEditing({ ...editing, images })}
+                  />
+                </div>
+              ) : (
+                <div className="sm:col-span-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  Save the property first to upload images via drag-and-drop. You can also add external image URLs above.
+                </div>
+              )}
               <div className="sm:col-span-2"><label className="rs-label">Required Documents (one per line)</label><textarea rows={4} className="rs-input" value={Array.isArray(editing.required_documents) ? editing.required_documents.join("\n") : editing.required_documents} onChange={(e) => setEditing({ ...editing, required_documents: e.target.value })} /></div>
               <div><label className="rs-label">Status</label><select className="rs-input" value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}><option value="available">Available</option><option value="rented">Rented</option><option value="hidden">Hidden</option><option value="pending">Pending</option></select></div>
               <label className="flex items-center gap-2 mt-7"><input type="checkbox" checked={editing.pet_friendly} onChange={(e) => setEditing({ ...editing, pet_friendly: e.target.checked })} /> Pet Friendly</label>
@@ -119,6 +143,114 @@ export default function AdminPropertiesPage() {
               <button onClick={save} className="rs-btn-primary" data-testid="save-property">Save</button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function PropertyImageManager({ property, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const inputRef = useRef(null);
+  const images = property.images || [];
+
+  const uploadFile = async (file) => {
+    setErr("");
+    if (!file.type.startsWith("image/")) { setErr("Only image files (JPG/PNG/WEBP) are allowed"); return; }
+    if (file.size > 8 * 1024 * 1024) { setErr("Max 8MB per image"); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      await api.post(`/admin/properties/${property.id}/images`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const r = await api.get(`/admin/properties`);
+      const fresh = r.data.find((p) => p.id === property.id);
+      if (fresh) onChange(fresh.images || []);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Upload failed");
+    } finally { setBusy(false); }
+  };
+
+  const onFiles = async (files) => {
+    for (const f of Array.from(files || [])) {
+      // eslint-disable-next-line no-await-in-loop
+      await uploadFile(f);
+    }
+  };
+
+  const removeAt = async (idx) => {
+    if (!window.confirm("Delete this image?")) return;
+    try {
+      const r = await api.delete(`/admin/properties/${property.id}/images/${idx}`);
+      onChange(r.data.images || []);
+    } catch (e) { setErr(e?.response?.data?.detail || "Delete failed"); }
+  };
+
+  const reorder = async (idx, delta) => {
+    const newIdx = idx + delta;
+    if (newIdx < 0 || newIdx >= images.length) return;
+    const order = images.map((_, i) => i);
+    [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+    try {
+      const r = await api.patch(`/admin/properties/${property.id}/images/reorder`, { order });
+      onChange(r.data.images || []);
+    } catch (e) { setErr(e?.response?.data?.detail || "Reorder failed"); }
+  };
+
+  return (
+    <div data-testid="property-image-manager">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
+        className={`rounded-xl border-2 border-dashed p-6 text-center transition cursor-pointer ${dragOver ? "border-[#C5A880] bg-[#C5A880]/5" : "border-slate-300 hover:border-[#0A192F] bg-slate-50/50"}`}
+        onClick={() => inputRef.current?.click()}
+        data-testid="image-dropzone"
+      >
+        {busy ? (
+          <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
+            <Loader2 className="w-4 h-4 animate-spin" /> Uploading…
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-2 text-slate-500">
+            <ImagePlus className="w-7 h-7 text-[#C5A880]" />
+            <div className="text-sm"><strong className="text-[#0A192F]">Drop images</strong> or click to browse</div>
+            <div className="text-xs text-slate-400">JPG, PNG, WEBP · up to 8 MB each</div>
+          </div>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => onFiles(e.target.files)}
+          data-testid="image-file-input"
+        />
+      </div>
+      {err && <div className="mt-2 text-xs text-red-600" data-testid="image-error">{err}</div>}
+      {images.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {images.map((ref, i) => (
+            <div key={`${ref}-${i}`} className="relative group rs-card overflow-hidden" data-testid={`property-image-${i}`}>
+              <div className="aspect-[4/3] bg-slate-100">
+                <img
+                  src={resolvePropertyImage(property, i)}
+                  alt={`Property ${i + 1}`}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              {i === 0 && <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-[#C5A880] text-white text-[10px] uppercase tracking-wider font-semibold">Cover</span>}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                <button onClick={(e) => { e.stopPropagation(); reorder(i, -1); }} disabled={i === 0} title="Move up" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-up-${i}`}><ChevronUp className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); reorder(i, 1); }} disabled={i === images.length - 1} title="Move down" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-down-${i}`}><ChevronDown className="w-4 h-4" /></button>
+                <button onClick={(e) => { e.stopPropagation(); removeAt(i); }} title="Delete" className="p-1.5 rounded bg-white/90 text-red-600" data-testid={`img-del-${i}`}><Trash2 className="w-4 h-4" /></button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, formatMoney, BACKEND_URL, SCREENING_LABELS, DECISION_LABELS, STATUS_BADGE } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X, Lock, Download, ImageIcon, FileDown } from "lucide-react";
+import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X, Lock, Download, ImageIcon, FileDown, RefreshCw, XCircle, ShieldCheck } from "lucide-react";
 
 const SCREENING_KEYS = ["identity_verification", "income_verification", "credit_report", "background_check", "criminal_record", "rental_history", "final_review"];
 
@@ -56,6 +56,11 @@ export default function AdminApplicationsPage() {
     load();
   };
 
+  const reviewDocument = async (idx, status, reason = "") => {
+    await api.patch(`/admin/applications/${selected.id}/documents/${idx}`, { status, reason });
+    openApp(selected.id);
+  };
+
   const markPayment = async (status) => {
     const fd = new FormData(); fd.append("status", status);
     await api.post(`/admin/applications/${selected.id}/payment/mark`, fd);
@@ -104,13 +109,13 @@ export default function AdminApplicationsPage() {
       </div>
 
       {selected && (
-        <ApplicationDetailModal app={selected} onClose={() => setSelected(null)} updateScreening={updateScreening} setDecision={setDecision} markPayment={markPayment} />
+        <ApplicationDetailModal app={selected} onClose={() => setSelected(null)} updateScreening={updateScreening} setDecision={setDecision} markPayment={markPayment} reviewDocument={reviewDocument} />
       )}
     </div>
   );
 }
 
-function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, markPayment }) {
+function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, markPayment, reviewDocument }) {
   const { user } = useAuth();
   const [tab, setTab] = useState("overview");
   const [decisionDraft, setDecisionDraft] = useState({ decision: app.decision || "", note: app.decision_note || "", applicant_message: app.applicant_message || "" });
@@ -225,30 +230,15 @@ function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, ma
 
           {tab === "documents" && (
             <div className="space-y-3">
-              {(app.documents || []).length === 0 ? <div className="text-slate-400 text-sm">No documents uploaded.</div> : app.documents.map((d, i) => {
-                const isImage = (d.content_type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(d.filename || "");
-                const Icon = isImage ? ImageIcon : FileText;
-                return (
-                  <div key={i} className="rs-card p-5 flex items-center gap-4" data-testid={`doc-row-${i}`}>
-                    <Icon className="w-8 h-8 text-[#C5A880]" />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
-                        <span>{d.type}</span>
-                        {d.is_sensitive && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Sensitive</span>}
-                      </div>
-                      <div className="text-xs text-slate-500 truncate">{d.filename} · {d.size ? `${Math.round(d.size / 1024)} KB` : ""} · {new Date(d.uploaded_at).toLocaleString()}</div>
-                    </div>
-                    <button
-                      onClick={() => viewDocument(i, d.is_sensitive)}
-                      className="rs-btn-outline !py-1.5 !px-3 text-xs"
-                      data-testid={`view-doc-${i}`}
-                    >
-                      <Eye className="w-3.5 h-3.5" /> View
-                    </button>
-                    <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700">{d.status}</span>
-                  </div>
-                );
-              })}
+              {(app.documents || []).length === 0 ? <div className="text-slate-400 text-sm">No documents uploaded.</div> : app.documents.map((d, i) => (
+                <DocumentRow
+                  key={i}
+                  d={d}
+                  idx={i}
+                  onView={() => viewDocument(i, d.is_sensitive)}
+                  onReview={reviewDocument}
+                />
+              ))}
               {viewerError && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{viewerError}</div>}
             </div>
           )}
@@ -347,3 +337,102 @@ const DataBlock = ({ title, data }) => (
     </div>
   </div>
 );
+
+
+const DOC_STATUS_STYLE = {
+  uploaded: { label: "Uploaded", cls: "bg-slate-100 text-slate-700 border-slate-200" },
+  verified: { label: "Verified", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  rejected: { label: "Rejected", cls: "bg-red-50 text-red-700 border-red-200" },
+  replacement_requested: { label: "Replacement Requested", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+};
+
+function DocumentRow({ d, idx, onView, onReview }) {
+  const isImage = (d.content_type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(d.filename || "");
+  const Icon = isImage ? ImageIcon : FileText;
+  const status = DOC_STATUS_STYLE[d.status] || DOC_STATUS_STYLE.uploaded;
+  const [busy, setBusy] = useState(false);
+  const [prompt, setPrompt] = useState(null); // 'reject' | 'replace'
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState("");
+
+  const act = async (action) => {
+    setErr("");
+    if (action === "verify") {
+      setBusy(true);
+      try { await onReview(idx, "verified", ""); } catch (e) { setErr(e?.response?.data?.detail || "Failed"); } finally { setBusy(false); }
+      return;
+    }
+    setPrompt(action);
+    setReason(d.review_reason || "");
+  };
+
+  const submitPrompt = async () => {
+    if (!reason.trim()) { setErr("A reason is required"); return; }
+    setBusy(true);
+    setErr("");
+    try {
+      await onReview(idx, prompt === "reject" ? "rejected" : "replacement_requested", reason.trim());
+      setPrompt(null);
+    } catch (e) { setErr(e?.response?.data?.detail || "Failed"); } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="rs-card p-5" data-testid={`doc-row-${idx}`}>
+      <div className="flex items-start gap-4">
+        <Icon className="w-8 h-8 text-[#C5A880] flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
+            <span>{d.type}</span>
+            {d.is_sensitive && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Sensitive</span>}
+            <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border ${status.cls}`} data-testid={`doc-status-${idx}`}>{status.label}</span>
+          </div>
+          <div className="text-xs text-slate-500 truncate">{d.filename} · {d.size ? `${Math.round(d.size / 1024)} KB` : ""} · {new Date(d.uploaded_at).toLocaleString()}</div>
+          {d.review_reason && (
+            <div className="text-xs mt-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200">
+              <span className="font-semibold text-slate-700">Reason: </span>
+              <span className="text-slate-600">{d.review_reason}</span>
+              {d.reviewed_by && <span className="text-slate-400 ml-2">— {d.reviewed_by}, {d.reviewed_at ? new Date(d.reviewed_at).toLocaleString() : ""}</span>}
+            </div>
+          )}
+        </div>
+        <div className="flex flex-col sm:flex-row gap-1.5 flex-shrink-0">
+          <button onClick={onView} className="rs-btn-outline !py-1.5 !px-3 text-xs" data-testid={`view-doc-${idx}`}>
+            <Eye className="w-3.5 h-3.5" /> View
+          </button>
+        </div>
+      </div>
+      {!prompt && (
+        <div className="mt-4 pt-3 border-t border-slate-100 flex gap-2 flex-wrap" data-testid={`doc-actions-${idx}`}>
+          <button onClick={() => act("verify")} disabled={busy || d.status === "verified"} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed transition" data-testid={`doc-verify-${idx}`}>
+            <ShieldCheck className="w-3.5 h-3.5" /> Verify
+          </button>
+          <button onClick={() => act("replace")} disabled={busy || d.status === "replacement_requested"} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed transition" data-testid={`doc-replace-${idx}`}>
+            <RefreshCw className="w-3.5 h-3.5" /> Request Replacement
+          </button>
+          <button onClick={() => act("reject")} disabled={busy || d.status === "rejected"} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-700 bg-red-50 border border-red-200 hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition" data-testid={`doc-reject-${idx}`}>
+            <XCircle className="w-3.5 h-3.5" /> Reject
+          </button>
+        </div>
+      )}
+      {prompt && (
+        <div className="mt-4 pt-3 border-t border-slate-100 space-y-2" data-testid={`doc-prompt-${idx}`}>
+          <label className="text-xs font-semibold text-slate-600">
+            {prompt === "reject" ? "Why are you rejecting this document?" : "What does the applicant need to do?"}
+          </label>
+          <textarea
+            rows={2} className="rs-input text-sm" value={reason} onChange={(e) => setReason(e.target.value)}
+            placeholder={prompt === "reject" ? "e.g. Document is blurry, unreadable" : "e.g. Upload your most recent paystub (within 30 days)"}
+            data-testid={`doc-reason-${idx}`}
+          />
+          {err && <div className="text-xs text-red-600">{err}</div>}
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => { setPrompt(null); setErr(""); }} className="px-3 py-1.5 text-xs text-slate-500 hover:text-[#0A192F]">Cancel</button>
+            <button onClick={submitPrompt} disabled={busy} className="rs-btn-primary !py-1.5 !px-3 text-xs" data-testid={`doc-prompt-submit-${idx}`}>
+              {busy ? "Saving…" : (prompt === "reject" ? "Reject Document" : "Request Replacement")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
