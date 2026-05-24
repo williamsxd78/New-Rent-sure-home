@@ -264,8 +264,9 @@ async def upload_doc(app_id: str, doc_type: str = Form(...), file: UploadFile = 
     if ext not in {"pdf", "jpg", "jpeg", "png"}:
         raise HTTPException(400, "Only PDF, JPG, PNG accepted")
     dt_lower = doc_type.lower().strip()
-    # Only the explicit full SSN document is super-admin-only. SSN selfie (identity verification) is a regular doc.
-    is_ssn_full = dt_lower == "ssn document"
+    # SSN Verification = the actual SSN document (super-admin sensitive)
+    # SSN Document = legacy alias, also sensitive
+    is_ssn_full = dt_lower in ("ssn document", "ssn verification")
     category = "ssn-secure" if is_ssn_full else "documents"
     path = build_path(category, app_id, ext)
     data = await file.read()

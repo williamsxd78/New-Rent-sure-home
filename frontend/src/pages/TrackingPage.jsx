@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
 import { api, STAGE_LABELS, DECISION_LABELS } from "@/lib/api";
-import { Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare } from "lucide-react";
+import { Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare, Info } from "lucide-react";
 
 const ICONS = {
   completed: CheckCircle2,
@@ -122,6 +122,17 @@ function TrackingResult({ data }) {
       </div>
 
       {/* Decision Banners */}
+      {!decision && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-5 mb-6 flex items-start gap-3" data-testid="processing-notice">
+          <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-blue-900 leading-relaxed">
+            <div className="font-semibold text-blue-900">Your application is being reviewed</div>
+            <div className="mt-1">
+              Most rental screenings are completed within <strong>24–48 hours</strong> of payment. We'll email you the moment your status changes, and you can refresh this page anytime to see the latest updates. Thanks for your patience.
+            </div>
+          </div>
+        </div>
+      )}
       {isApproved && (
         <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-8 text-center mb-6" data-testid="approved-card">
           <div className="w-14 h-14 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto mb-3"><CheckCircle2 className="w-7 h-7" /></div>

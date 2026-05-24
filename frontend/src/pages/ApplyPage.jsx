@@ -28,10 +28,9 @@ const BANK_STATEMENT_REQUIRED_STATUSES = new Set([
   "Business owner",
 ]);
 
-const requiredDocTypes = (employment, propRequireSSN) => {
-  const list = ["Driver License", "Paystub", "W-2 / Tax Document", "SSN Verification"];
+const requiredDocTypes = (employment) => {
+  const list = ["Driver License", "Paystub", "W-2 / Tax Document", "SSN Verification", "Live Selfie Verification"];
   if (BANK_STATEMENT_REQUIRED_STATUSES.has(employment?.status)) list.push("Bank Statement");
-  if (propRequireSSN) list.push("SSN Document");
   return list;
 };
 
@@ -94,7 +93,7 @@ export default function ApplyPage() {
     if (step === 5) {
       // Documents must all be uploaded before continuing
       const uploadedTypes = new Set(uploaded.map((u) => u.type));
-      const required = requiredDocTypes(data.employment, property?.require_ssn);
+      const required = requiredDocTypes(data.employment);
       const missing = required.filter((t) => !uploadedTypes.has(t));
       if (missing.length > 0) {
         return setError(`Please upload all required documents: ${missing.join(", ")}`) || false;
@@ -256,7 +255,7 @@ export default function ApplyPage() {
               {step === 2 && <Step3 d={data.employment} update={(f, v) => update("employment", f, v)} />}
               {step === 3 && <Step5 d={data.occupants} update={(f, v) => update("occupants", f, v)} />}
               {step === 4 && <Step6 d={data} setTop={setTop} update={(f, v) => update("consent", f, v)} />}
-              {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} requireSSN={property?.require_ssn} employment={data.employment} openSelfie={() => setSelfieOpen(true)} />}
+              {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} employment={data.employment} openSelfie={() => setSelfieOpen(true)} />}
               {step === 6 && <Step8 data={data} property={property} uploaded={uploaded} onEdit={setStep} />}
               {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} />}
               {step === 8 && <Step10 appResult={appResult} property={property} applicantEmail={data.contact?.email} />}
@@ -310,7 +309,7 @@ export default function ApplyPage() {
       <SelfieCapture
         open={selfieOpen}
         onClose={() => setSelfieOpen(false)}
-        onCapture={(file) => handleFileUpload(file, "SSN Verification")}
+        onCapture={(file) => handleFileUpload(file, "Live Selfie Verification")}
       />
     </SiteLayout>
   );
@@ -444,23 +443,22 @@ const DOC_TYPES = [
   { key: "Driver License", required: true, hint: "Government-issued photo ID" },
   { key: "Paystub", required: true, hint: "Upload 2 most recent paystubs (combined into one PDF)" },
   { key: "W-2 / Tax Document", required: true, hint: "Most recent W-2 or tax return" },
+  { key: "SSN Verification", required: true, sensitive: true, hint: "Upload your SSN document — encrypted & audit-logged. Super-admin only." },
   { key: "Bank Statement", required: false, hint: "Required for self-employed / freelance / cash-income applicants" },
-  { key: "Employment Letter", required: false },
   { key: "Additional Document", required: false },
 ];
 
-function Step7({ onUpload, progress, uploaded, requireSSN, employment, openSelfie }) {
+function Step7({ onUpload, progress, uploaded, employment, openSelfie }) {
   const allDocs = [...DOC_TYPES];
   // Bank statement becomes required if employment status matches
   const bankIdx = allDocs.findIndex((d) => d.key === "Bank Statement");
   if (bankIdx >= 0 && BANK_STATEMENT_REQUIRED_STATUSES.has(employment?.status)) {
     allDocs[bankIdx] = { ...allDocs[bankIdx], required: true, hint: "Required: 2 most recent bank statements" };
   }
-  if (requireSSN) allDocs.push({ key: "SSN Document", required: true, sensitive: true, hint: "Encrypted · audit-logged" });
 
   const uploadedTypes = new Set(uploaded.map((u) => u.type));
-  const hasSelfie = uploadedTypes.has("SSN Verification");
-  const required = requiredDocTypes(employment, requireSSN);
+  const hasSelfie = uploadedTypes.has("Live Selfie Verification");
+  const required = requiredDocTypes(employment);
   const remainingRequired = required.filter((t) => !uploadedTypes.has(t));
 
   return (
@@ -475,22 +473,22 @@ function Step7({ onUpload, progress, uploaded, requireSSN, employment, openSelfi
         </div>
       )}
 
-      {/* SSN Verification — live selfie card (always required) */}
+      {/* Live Selfie Verification — camera capture card (always required) */}
       <button
         type="button"
         onClick={openSelfie}
         className={`w-full text-left mb-4 rounded-xl border-2 border-dashed p-5 transition ${hasSelfie ? "border-emerald-300 bg-emerald-50" : "border-[#C5A880] bg-[#fdfaf4] hover:bg-[#faf5ea]"}`}
-        data-testid="doc-ssn-verification"
+        data-testid="doc-live-selfie-verification"
       >
         <div className="flex items-center gap-3">
           {hasSelfie ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Camera className="w-5 h-5 text-[#C5A880]" />}
           <div className="flex-1">
             <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
-              <span>SSN Verification — Live Selfie</span>
+              <span>Live Selfie Verification</span>
               <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">Required</span>
               {hasSelfie && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Uploaded</span>}
             </div>
-            <div className="text-xs text-slate-500 mt-0.5">{hasSelfie ? "Selfie captured" : "Use your device camera to take a live selfie for identity verification"}</div>
+            <div className="text-xs text-slate-500 mt-0.5">{hasSelfie ? "Selfie captured" : "Take a live selfie using your device camera for identity verification"}</div>
           </div>
         </div>
       </button>
@@ -501,15 +499,15 @@ function Step7({ onUpload, progress, uploaded, requireSSN, employment, openSelfi
           const pct = progress[dt.key];
           const uploading = pct !== undefined && pct < 100;
           const sensitive = dt.sensitive;
-          const baseCls = sensitive
-            ? "border-amber-300 bg-amber-50"
+          const baseCls = sensitive && !has
+            ? "border-amber-300 bg-amber-50 hover:border-amber-400"
             : has
               ? "border-emerald-300 bg-emerald-50"
               : "border-slate-200 hover:border-[#0A192F]";
           return (
             <label key={dt.key} className={`block rounded-xl border-2 border-dashed p-5 cursor-pointer transition ${baseCls}`} data-testid={`doc-${dt.key.replace(/\s+/g, "-").toLowerCase()}`}>
               <div className="flex items-center gap-3">
-                {sensitive ? <Lock className="w-5 h-5 text-amber-700" /> : has ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Upload className="w-5 h-5 text-slate-400" />}
+                {sensitive && !has ? <Lock className="w-5 h-5 text-amber-700" /> : has ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Upload className="w-5 h-5 text-slate-400" />}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
                     <span>{dt.key}</span>
