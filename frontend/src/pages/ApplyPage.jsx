@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
+import SelfieCapture from "@/components/site/SelfieCapture";
 import { api, formatMoney } from "@/lib/api";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
-  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink,
+  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera,
 } from "lucide-react";
 
 const STEPS = [
@@ -19,6 +20,21 @@ const STEPS = [
   "Submit & Tracking",
 ];
 
+// Employment statuses that require a bank statement
+const BANK_STATEMENT_REQUIRED_STATUSES = new Set([
+  "Self-employed",
+  "Freelancer / gig worker",
+  "Cash income",
+  "Business owner",
+]);
+
+const requiredDocTypes = (employment, propRequireSSN) => {
+  const list = ["Driver License", "Paystub", "W-2 / Tax Document", "SSN Verification"];
+  if (BANK_STATEMENT_REQUIRED_STATUSES.has(employment?.status)) list.push("Bank Statement");
+  if (propRequireSSN) list.push("SSN Document");
+  return list;
+};
+
 const blank = {
   personal: { first_name: "", middle_name: "", last_name: "", dob: "", id_type: "Driver License", id_number: "", ssn_last4: "", ssn_full: "", marital_status: "" },
   contact: { email: "", phone: "", current_address: "", city: "", state: "", zip: "", duration: "", current_rent: "", landlord_name: "", landlord_phone: "" },
@@ -29,8 +45,6 @@ const blank = {
   signature_date: "",
   agreed_signature: false,
 };
-
-const REQUIRED_DOC_TYPES = ["Driver License", "Paystub 1", "Paystub 2", "W-2 / Tax Document"];
 
 export default function ApplyPage() {
   const { propertyId } = useParams();
@@ -47,6 +61,7 @@ export default function ApplyPage() {
   const [uploaded, setUploaded] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [selfieOpen, setSelfieOpen] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => { api.get(`/properties/${propertyId}`).then((r) => setProperty(r.data)).catch(() => {}); }, [propertyId]);
@@ -79,8 +94,8 @@ export default function ApplyPage() {
     if (step === 5) {
       // Documents must all be uploaded before continuing
       const uploadedTypes = new Set(uploaded.map((u) => u.type));
-      const missing = REQUIRED_DOC_TYPES.filter((t) => !uploadedTypes.has(t));
-      if (property?.require_ssn && !uploadedTypes.has("SSN Document")) missing.push("SSN Document");
+      const required = requiredDocTypes(data.employment, property?.require_ssn);
+      const missing = required.filter((t) => !uploadedTypes.has(t));
       if (missing.length > 0) {
         return setError(`Please upload all required documents: ${missing.join(", ")}`) || false;
       }
@@ -90,8 +105,8 @@ export default function ApplyPage() {
 
   const next = async () => {
     if (!validateStep()) return;
-    if (step === 6 && !appResult) {
-      // submit application before payment
+    if (step === 6) {
+      // submit application before payment (create or patch existing pre-created app)
       try {
         setSubmitting(true);
         const payload = {
@@ -107,8 +122,14 @@ export default function ApplyPage() {
           signature_date: data.signature_date || new Date().toISOString(),
           agreed_signature: data.agreed_signature,
         };
-        const r = await api.post("/applications", payload);
-        setAppResult(r.data);
+        if (appResult) {
+          // App was pre-created during early doc upload — patch it with full form data
+          const r = await api.patch(`/applications/${appResult.id}`, payload);
+          setAppResult({ ...appResult, ...r.data });
+        } else {
+          const r = await api.post("/applications", payload);
+          setAppResult(r.data);
+        }
       } catch (e) {
         setError(e?.response?.data?.detail || "Could not submit application");
         setSubmitting(false);
@@ -235,10 +256,10 @@ export default function ApplyPage() {
               {step === 2 && <Step3 d={data.employment} update={(f, v) => update("employment", f, v)} />}
               {step === 3 && <Step5 d={data.occupants} update={(f, v) => update("occupants", f, v)} />}
               {step === 4 && <Step6 d={data} setTop={setTop} update={(f, v) => update("consent", f, v)} />}
-              {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} requireSSN={property?.require_ssn} />}
+              {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} requireSSN={property?.require_ssn} employment={data.employment} openSelfie={() => setSelfieOpen(true)} />}
               {step === 6 && <Step8 data={data} property={property} uploaded={uploaded} onEdit={setStep} />}
               {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} />}
-              {step === 8 && <Step10 appResult={appResult} property={property} />}
+              {step === 8 && <Step10 appResult={appResult} property={property} applicantEmail={data.contact?.email} />}
 
               {step < 8 && (
                 <div className="mt-9 pt-6 border-t border-slate-100 flex flex-wrap justify-between gap-3" data-testid="apply-nav">
@@ -285,6 +306,12 @@ export default function ApplyPage() {
           </div>
         </div>
       )}
+
+      <SelfieCapture
+        open={selfieOpen}
+        onClose={() => setSelfieOpen(false)}
+        onCapture={(file) => handleFileUpload(file, "SSN Verification")}
+      />
     </SiteLayout>
   );
 }
@@ -339,7 +366,18 @@ function Step2({ d, update }) {
 function Step3({ d, update }) {
   return (
     <div className="grid sm:grid-cols-2 gap-4">
-      <Field label="Employment Status"><select className="rs-input" value={d.status} onChange={(e) => update("status", e.target.value)} data-testid="f-emp-status"><option>Employed</option><option>Self-employed</option><option>Student</option><option>Retired</option><option>Other</option></select></Field>
+      <Field label="Employment Status">
+        <select className="rs-input" value={d.status} onChange={(e) => update("status", e.target.value)} data-testid="f-emp-status">
+          <option>Employed</option>
+          <option>Self-employed</option>
+          <option>Freelancer / gig worker</option>
+          <option>Cash income</option>
+          <option>Business owner</option>
+          <option>Student</option>
+          <option>Retired</option>
+          <option>Other</option>
+        </select>
+      </Field>
       <Field label="Employer Name"><input className="rs-input" value={d.employer} onChange={(e) => update("employer", e.target.value)} data-testid="f-employer" /></Field>
       <Field label="Job Title"><input className="rs-input" value={d.title} onChange={(e) => update("title", e.target.value)} data-testid="f-job-title" /></Field>
       <Field label="Employer Phone / Email"><input className="rs-input" value={d.employer_phone} onChange={(e) => update("employer_phone", e.target.value)} data-testid="f-employer-phone" /></Field>
@@ -403,32 +441,59 @@ function Step6({ d, setTop, update }) {
 }
 
 const DOC_TYPES = [
-  { key: "Driver License", required: true },
-  { key: "Paystub 1", required: true },
-  { key: "Paystub 2", required: true },
-  { key: "W-2 / Tax Document", required: true },
-  { key: "Bank Statement", required: false },
+  { key: "Driver License", required: true, hint: "Government-issued photo ID" },
+  { key: "Paystub", required: true, hint: "Upload 2 most recent paystubs (combined into one PDF)" },
+  { key: "W-2 / Tax Document", required: true, hint: "Most recent W-2 or tax return" },
+  { key: "Bank Statement", required: false, hint: "Required for self-employed / freelance / cash-income applicants" },
   { key: "Employment Letter", required: false },
   { key: "Additional Document", required: false },
 ];
 
-function Step7({ onUpload, progress, uploaded, requireSSN }) {
+function Step7({ onUpload, progress, uploaded, requireSSN, employment, openSelfie }) {
   const allDocs = [...DOC_TYPES];
-  if (requireSSN) allDocs.push({ key: "SSN Document", required: true, sensitive: true });
+  // Bank statement becomes required if employment status matches
+  const bankIdx = allDocs.findIndex((d) => d.key === "Bank Statement");
+  if (bankIdx >= 0 && BANK_STATEMENT_REQUIRED_STATUSES.has(employment?.status)) {
+    allDocs[bankIdx] = { ...allDocs[bankIdx], required: true, hint: "Required: 2 most recent bank statements" };
+  }
+  if (requireSSN) allDocs.push({ key: "SSN Document", required: true, sensitive: true, hint: "Encrypted · audit-logged" });
+
   const uploadedTypes = new Set(uploaded.map((u) => u.type));
-  const remainingRequired = allDocs.filter((d) => d.required && !uploadedTypes.has(d.key));
+  const hasSelfie = uploadedTypes.has("SSN Verification");
+  const required = requiredDocTypes(employment, requireSSN);
+  const remainingRequired = required.filter((t) => !uploadedTypes.has(t));
 
   return (
     <div>
       <h2 className="font-display text-xl font-semibold text-[#0A192F] mb-2">Upload Required Documents</h2>
-      <p className="text-sm text-slate-500 mb-5">Accepted formats: PDF, JPG, PNG · Max 10 MB per file. All required (*) documents must be uploaded to continue.</p>
+      <p className="text-sm text-slate-500 mb-5">Accepted formats: PDF, JPG, PNG · Max 10 MB per file. All required documents must be uploaded to continue.</p>
 
       {remainingRequired.length > 0 && (
         <div className="mb-5 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 flex gap-2" data-testid="docs-remaining-notice">
           <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          <div><strong>{remainingRequired.length} required document{remainingRequired.length > 1 ? "s" : ""}</strong> still needed: {remainingRequired.map((d) => d.key).join(", ")}</div>
+          <div><strong>{remainingRequired.length} required item{remainingRequired.length > 1 ? "s" : ""}</strong> still needed: {remainingRequired.join(", ")}</div>
         </div>
       )}
+
+      {/* SSN Verification — live selfie card (always required) */}
+      <button
+        type="button"
+        onClick={openSelfie}
+        className={`w-full text-left mb-4 rounded-xl border-2 border-dashed p-5 transition ${hasSelfie ? "border-emerald-300 bg-emerald-50" : "border-[#C5A880] bg-[#fdfaf4] hover:bg-[#faf5ea]"}`}
+        data-testid="doc-ssn-verification"
+      >
+        <div className="flex items-center gap-3">
+          {hasSelfie ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Camera className="w-5 h-5 text-[#C5A880]" />}
+          <div className="flex-1">
+            <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
+              <span>SSN Verification — Live Selfie</span>
+              <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">Required</span>
+              {hasSelfie && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Uploaded</span>}
+            </div>
+            <div className="text-xs text-slate-500 mt-0.5">{hasSelfie ? "Selfie captured" : "Use your device camera to take a live selfie for identity verification"}</div>
+          </div>
+        </div>
+      </button>
 
       <div className="grid sm:grid-cols-2 gap-4">
         {allDocs.map((dt) => {
@@ -452,7 +517,7 @@ function Step7({ onUpload, progress, uploaded, requireSSN }) {
                     {has && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Uploaded</span>}
                   </div>
                   <div className="text-xs text-slate-500 truncate">
-                    {sensitive && !has ? "Encrypted · Mask preview only · Audit logged" : (has ? has.filename : "Click to upload or replace")}
+                    {has ? has.filename : (dt.hint || "Click to upload")}
                   </div>
                 </div>
               </div>
@@ -564,7 +629,7 @@ function Step9({ property, appResult, paymentDone, handlePay }) {
   );
 }
 
-function Step10({ appResult, property }) {
+function Step10({ appResult, property, applicantEmail }) {
   const navigate = useNavigate();
   const copy = () => navigator.clipboard.writeText(appResult?.application_number || "");
   return (
@@ -583,10 +648,11 @@ function Step10({ appResult, property }) {
         <div className="mt-4 pt-4 border-t border-slate-100 space-y-1.5 text-sm text-slate-600">
           <div>Property: <span className="text-[#0A192F]">{property?.title}</span></div>
           <div>Location: <span className="text-[#0A192F]">{property?.city}, {property?.state}</span></div>
+          {applicantEmail && <div>Email: <span className="text-[#0A192F]" data-testid="success-email">{applicantEmail}</span></div>}
         </div>
       </div>
       <div className="mt-7 flex flex-wrap gap-3 justify-center">
-        <button onClick={() => navigate("/track", { state: { id: appResult?.application_number } })} className="rs-btn-primary" data-testid="success-track-btn">
+        <button onClick={() => navigate("/track", { state: { id: appResult?.application_number, email: applicantEmail } })} className="rs-btn-primary" data-testid="success-track-btn">
           <ExternalLink className="w-4 h-4" /> Track My Application
         </button>
         <button onClick={() => window.print()} className="rs-btn-outline" data-testid="success-pdf-btn">Download Confirmation</button>

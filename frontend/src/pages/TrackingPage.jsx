@@ -22,7 +22,7 @@ const COLORS = {
 export default function TrackingPage() {
   const location = useLocation();
   const [id, setId] = useState(location.state?.id || "");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(location.state?.email || "");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -39,6 +39,14 @@ export default function TrackingPage() {
       setData(null);
     } finally { setLoading(false); }
   };
+
+  // Auto-submit if both fields pre-filled (navigated from apply success)
+  useEffect(() => {
+    if (location.state?.id && location.state?.email && !data && !loading) {
+      submit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <SiteLayout>

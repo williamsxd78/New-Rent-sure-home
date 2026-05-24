@@ -3,6 +3,7 @@ import "@/App.css";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/lib/auth";
 import { Toaster } from "@/components/ui/sonner";
+import ScrollToTop from "@/components/site/ScrollToTop";
 
 import HomePage from "@/pages/HomePage";
 import PropertiesPage from "@/pages/PropertiesPage";
@@ -38,6 +39,7 @@ function App() {
     <div className="App">
       <AuthProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/properties" element={<PropertiesPage />} />

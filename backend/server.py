@@ -217,6 +217,43 @@ async def create_application(payload: ApplicationCreate):
     return {"id": app_id, "application_number": app_number, "application_fee": prop.get("application_fee", 50)}
 
 
+@api.patch("/applications/{app_id}")
+async def update_application(app_id: str, payload: ApplicationCreate):
+    """Update an in-progress application (used when app was pre-created during early doc upload)."""
+    existing = await db.applications.find_one({"id": app_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Application not found")
+    # Don't allow editing after final submit (paid)
+    if existing.get("payment", {}).get("status") == "paid":
+        raise HTTPException(400, "Application already paid — cannot modify")
+
+    now = datetime.now(timezone.utc).isoformat()
+    personal = payload.personal or {}
+    contact = payload.contact or {}
+    applicant_name = f"{personal.get('first_name','').strip()} {personal.get('last_name','').strip()}".strip() or existing.get("applicant_name", "Applicant")
+    applicant_email = (contact.get("email") or personal.get("email") or existing.get("applicant_email", "")).lower()
+    applicant_phone = contact.get("phone") or personal.get("phone") or existing.get("applicant_phone", "")
+
+    update = {
+        "personal": personal,
+        "contact": contact,
+        "employment": payload.employment or {},
+        "rental_history": payload.rental_history or {},
+        "occupants": payload.occupants or {},
+        "consent": payload.consent or {},
+        "ssn_last4": payload.ssn_last4 or existing.get("ssn_last4"),
+        "signature_name": payload.signature_name,
+        "signature_date": payload.signature_date,
+        "agreed_signature": payload.agreed_signature,
+        "applicant_name": applicant_name,
+        "applicant_email": applicant_email,
+        "applicant_phone": applicant_phone,
+        "updated_at": now,
+    }
+    await db.applications.update_one({"id": app_id}, {"$set": update})
+    return {"id": app_id, "application_number": existing.get("application_number"), "application_fee": existing.get("payment", {}).get("amount", 50)}
+
+
 # ------------------ Document Upload (during application) ------------------
 @api.post("/applications/{app_id}/upload")
 async def upload_doc(app_id: str, doc_type: str = Form(...), file: UploadFile = File(...)):
