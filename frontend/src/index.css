@@ -67,6 +67,14 @@ h6,
     }
 }
 
+/* Hide platform badge if ever re-injected */
+#emergent-badge,
+a[id="emergent-badge"],
+a[href*="emergent-badge"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
 /* Helpers */
 .rs-container {
     @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
