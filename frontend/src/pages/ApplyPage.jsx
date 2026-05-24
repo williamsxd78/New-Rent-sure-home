@@ -2,10 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
 import SelfieCapture from "@/components/site/SelfieCapture";
-import { api, formatMoney } from "@/lib/api";
+import { api, formatMoney, downloadConfirmationPdf } from "@/lib/api";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
-  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera, Landmark, Clipboard, Building2,
+  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera, Landmark, Clipboard, Building2, Download,
 } from "lucide-react";
 
 const STEPS = [
