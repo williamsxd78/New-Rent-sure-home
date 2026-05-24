@@ -689,12 +689,15 @@ async def update_admin_user(user_id: str, payload: dict, admin=Depends(require_s
     user = await db.admin_users.find_one({"id": user_id}, {"_id": 0})
     if not user:
         raise HTTPException(404, "User not found")
+    is_self = user_id == admin["id"]
     updates = {}
     if "name" in payload:
         updates["name"] = (payload["name"] or "").strip() or user["name"]
     if "role" in payload:
         if payload["role"] not in ADMIN_ROLES:
             raise HTTPException(400, "Invalid role")
+        if is_self and payload["role"] != "super_admin":
+            raise HTTPException(400, "You cannot change your own role")
         # Safeguard: prevent demoting the last active super_admin
         if user.get("role") == "super_admin" and payload["role"] != "super_admin":
             others = await db.admin_users.count_documents({"role": "super_admin", "active": True, "id": {"$ne": user_id}})
@@ -702,6 +705,8 @@ async def update_admin_user(user_id: str, payload: dict, admin=Depends(require_s
                 raise HTTPException(400, "Cannot demote the last active super admin")
         updates["role"] = payload["role"]
     if "active" in payload:
+        if is_self and not payload["active"]:
+            raise HTTPException(400, "You cannot deactivate your own account")
         if user.get("role") == "super_admin" and not payload["active"]:
             others = await db.admin_users.count_documents({"role": "super_admin", "active": True, "id": {"$ne": user_id}})
             if others == 0:

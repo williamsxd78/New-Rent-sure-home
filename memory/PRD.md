@@ -47,17 +47,40 @@ Create a professional, premium, trust-focused rental property application and te
 - ✅ Rich seed data: 12 properties, 3 sample reviews, 4 demo applications across decision states
 - ✅ Idempotent payment init (won't reset a paid application)
 
-## Prioritized Backlog (P1/P2)
-- **P1** Real PayPal integration (replace demo capture with PayPal SDK using stored client_id/secret)
-- **P1** SMTP-driven email sending (currently SMTP is stored but not used; wire up Notification templates)
-- **P1** Admin user management UI (currently seed-only; CRUD with role assignment)
+## Implemented (Feb 2026 — current session)
+- ✅ **Bank Transfer (alternate payment)** — admin-configurable wire/ACH details (bank name, account name, account number, routing, address, instructions, contact email) in Admin → Settings → Bank Transfer. Applicants pick PayPal or Bank Transfer at payment step; bank transfers post a transaction reference and land in `pending_verification` for admin verification.
+- ✅ **Branded Confirmation PDF** (`reportlab`) — `GET /api/applications/{id}/confirmation-pdf?email=` returns a 1-page navy/gold receipt with applicant info, property, payment summary and "what happens next". Download button on Apply success step (Step 10) and on the Tracking page card after a successful track.
+- ✅ **CSV Export of applications** — `GET /api/admin/applications/export.csv` (Bearer, supports `?q=`). "Export CSV" button on /admin/applications.
+- ✅ **Support / Live Chat placeholder widget** — floating launcher on every public page with email & phone shortcuts plus a message form posting to `POST /api/contact` (stored in `db.support_messages`). Admin can list at `/api/admin/support-messages`. Wired for future live chat integration.
+- ✅ **Admin User Management (super_admin only)** — full CRUD UI at `/admin/users`. Roles: super_admin, manager, document_reviewer, support. Endpoints: `GET/POST/PATCH/DELETE /api/admin/users`. Guards: cannot delete self, cannot deactivate/demote self, cannot delete/deactivate/demote the last active super_admin, dup-email 409, weak-pw 400, invalid role 400. Login rejects `active=false`. Sidebar entry shown only for super_admins.
+- ✅ Verified by testing agent: 22/22 new endpoint tests pass + frontend smoke (Iteration 3 report).
+
+## Implemented (earlier in Feb 2026)
+- ✅ All backend endpoints (54/54 backend tests passing including 17 new for PayPal/SMTP integration)
+- ✅ All public site pages with responsive design + brand consistency
+- ✅ 10-step application wizard with progress bar, auto-save, validation, edit-on-review
+- ✅ Document upload (PDF/JPG/PNG, 10MB limit, SSN-secure category, multi-file paystub)
+- ✅ Live selfie capture via custom `SelfieCapture.jsx`
+- ✅ **PayPal: admin-configurable** (Demo / Sandbox / Live) via `/admin/settings`
+- ✅ **SMTP: admin-configurable** with "Send Test Email" + auto-emails on submit/payment/decision
+- ✅ Tracking page with 11-stage timeline, NOT QUALIFIED watermark, Pre-Approved success card
+- ✅ Admin login (JWT, super_admin seeded on startup) + sidebar layout
+- ✅ Admin dashboard, properties CRUD, applications detail modal, reviews, refunds, audit logs, settings
+- ✅ Audit log on full SSN view (super_admin only with reason)
+- ✅ 9 Policy pages with template content + attorney-review disclaimer
+- ✅ Rich seed data: 12 properties, 3 sample reviews, 4 demo applications across decision states
+
+## Prioritized Backlog (remaining)
 - **P2** Per-document Admin "verified / rejected / request replacement" workflow UI
 - **P2** Adverse Action Notice generator with full template + send action
-- **P2** Export CSV of applications
 - **P2** Property image uploads via storage (currently URL-only)
 - **P2** Saved-draft retrieval by email + magic link (currently local-storage only)
 - **P2** Map/location search on Properties page
+- **P2** Refactor: split `server.py` (~1230 lines) into `routers/` (admin_users, payments, public_contact, pdf, ...)
+- **P2** Refactor: split `ApplyPage.jsx` (~820 lines) into per-step components
+- **P2** Replace `/api/contact` raw dict with Pydantic `ContactIn` schema for stricter validation
 - **P3** Multi-language (i18n)
+- **P3** Rate-limit on public `/api/contact` and `/api/applications/{id}/confirmation-pdf`
 
 ## Default Admin Credentials (development)
 - Email: `admin@rentsurehomes.com`
@@ -67,3 +90,4 @@ Create a professional, premium, trust-focused rental property application and te
 - Emergent Object Storage is initialized once at startup; soft-deletes only (storage has no delete API).
 - All routes prefixed with `/api` for Kubernetes ingress.
 - CORS is currently `*`; tighten before prod.
+- Pre-existing failing test `test_rentsure.py::test_upload_ssn_doc` (uses `doc_type='ssn_card'` while server flags `'ssn document'`/`'ssn verification'`) — unrelated to current session.
