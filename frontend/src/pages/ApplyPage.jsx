@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
 import SelfieCapture from "@/components/site/SelfieCapture";
+import SubmittingOverlay from "@/components/site/SubmittingOverlay";
+import SecureSSNInput, { maskedSSN } from "@/components/site/SecureSSNInput";
 import { api, formatMoney, downloadConfirmationPdf } from "@/lib/api";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
@@ -48,9 +50,9 @@ const getMissingDocs = (uploaded, employment) => {
 };
 
 const blank = {
-  personal: { first_name: "", middle_name: "", last_name: "", dob: "", id_type: "Driver License", id_number: "", ssn_last4: "", ssn_full: "", marital_status: "" },
+  personal: { first_name: "", middle_name: "", last_name: "", dob: "", id_type: "Driver License", id_number: "", ssn_full: "", marital_status: "" },
   contact: { email: "", phone: "", current_address: "", city: "", state: "", zip: "", duration: "", current_rent: "", landlord_name: "", landlord_phone: "" },
-  employment: { status: "Employed", employer: "", title: "", employer_phone: "", monthly_income: "", additional_income: "", income_source: "", start_date: "" },
+  employment: { status: "Employed", employer: "", title: "", employer_phone: "", monthly_income: "", additional_income: "", income_source: "" },
   occupants: { adults: 1, children: 0, other_occupants: "", pets: "No", smoking: "No", move_in_date: "" },
   consent: { identity: false, credit: false, background: false, criminal: false, eviction: false, employment: false, fee_disclosure: false, truth_certification: false },
   signature_name: "",
@@ -77,13 +79,17 @@ export default function ApplyPage() {
     } catch { return null; }
   });
   const [paymentDone, setPaymentDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [overlayDone, setOverlayDone] = useState(false);
+  const [pendingPaymentResult, setPendingPaymentResult] = useState(null); // {method}
+  const [pendingPayPalRedirect, setPendingPayPalRedirect] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState(""); // "paypal" or "bank_transfer"
   const [bankInfo, setBankInfo] = useState(null);
   const [bankTxnId, setBankTxnId] = useState("");
   const [bankSubmitting, setBankSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({}); // { docType: 0-100 }
   const [uploaded, setUploaded] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [selfieOpen, setSelfieOpen] = useState(false);
   const [error, setError] = useState("");
@@ -155,6 +161,7 @@ export default function ApplyPage() {
       // submit application before payment (create or patch existing pre-created app)
       try {
         setSubmitting(true);
+        const ssnFull = (data.personal.ssn_full || "").replace(/\D/g, "");
         const payload = {
           property_id: propertyId,
           personal: data.personal,
@@ -163,7 +170,7 @@ export default function ApplyPage() {
           occupants: data.occupants,
           consent: data.consent,
           documents: uploaded,
-          ssn_last4: data.personal.ssn_last4 || null,
+          ssn_last4: ssnFull ? ssnFull.slice(-4) : null,
           signature_name: data.signature_name,
           signature_date: data.signature_date || new Date().toISOString(),
           agreed_signature: data.agreed_signature,
@@ -230,43 +237,75 @@ export default function ApplyPage() {
 
   const handlePay = async () => {
     if (!appResult) return;
+    setError("");
+    setOverlayDone(false);
+    setPendingPaymentResult(null);
+    setPendingPayPalRedirect(null);
+    setPaymentProcessing(true);
     try {
       const r = await api.post("/payments/init", { application_id: appResult.id, amount: appResult.application_fee, method: "paypal" });
       const mode = r.data.mode;
       if (mode === "demo") {
-        // Demo flow: capture immediately
         const fd = new FormData();
         fd.append("application_id", appResult.id);
         fd.append("order_id", r.data.order_id);
         await api.post("/payments/capture", fd);
-        setPaymentDone(true);
+        setPendingPaymentResult({ method: "paypal" });
         return;
       }
-      // Real PayPal — persist state and redirect to PayPal
       localStorage.setItem(`rs_pp_state_${propertyId}`, JSON.stringify({ app_id: appResult.id, app_number: appResult.application_number, application_fee: appResult.application_fee, step: 8 }));
-      window.location.href = r.data.approve_url;
-    } catch (e) { setError("Payment failed: " + (e?.response?.data?.detail || "")); }
+      setPendingPayPalRedirect(r.data.approve_url);
+    } catch (e) {
+      setPaymentProcessing(false);
+      setError("Payment failed: " + (e?.response?.data?.detail || ""));
+    }
   };
 
   const submitBankTransfer = async () => {
     if (!appResult || !bankTxnId.trim()) return;
-    setBankSubmitting(true);
     setError("");
+    setOverlayDone(false);
+    setPendingPaymentResult(null);
+    setPaymentProcessing(true);
+    setBankSubmitting(true);
     try {
       const fd = new FormData();
       fd.append("application_id", appResult.id);
       fd.append("transaction_id", bankTxnId.trim());
       await api.post("/payments/bank-transfer", fd);
-      setPaymentDone(true);
+      setPendingPaymentResult({ method: "bank_transfer" });
     } catch (e) {
+      setPaymentProcessing(false);
       setError("Submit failed: " + (e?.response?.data?.detail || ""));
     } finally { setBankSubmitting(false); }
   };
 
+  // Close the payment overlay only AFTER both: (1) the visual stages finished
+  // AND (2) the API call resolved (or errored). Prevents users seeing the
+  // success screen before the server actually confirms the transaction.
+  useEffect(() => {
+    if (!paymentProcessing || !overlayDone) return;
+    if (pendingPayPalRedirect) {
+      window.location.href = pendingPayPalRedirect;
+      return;
+    }
+    if (pendingPaymentResult) {
+      setPaymentProcessing(false);
+      setOverlayDone(false);
+      setPendingPaymentResult(null);
+      setPaymentDone(true);
+    }
+  }, [paymentProcessing, overlayDone, pendingPaymentResult, pendingPayPalRedirect]);
+
   const finalSubmit = () => {
     setConfirmOpen(false);
+    setSubmitting(true);
+  };
+
+  const handleSubmitOverlayDone = () => {
     localStorage.removeItem(`rs_apply_${propertyId}`);
     localStorage.removeItem(`rs_apply_step_${propertyId}`);
+    setSubmitting(false);
     setStep(8);
   };
 
@@ -375,6 +414,35 @@ export default function ApplyPage() {
         onClose={() => setSelfieOpen(false)}
         onCapture={(file) => handleFileUpload(file, "Live Selfie Verification")}
       />
+
+      <SubmittingOverlay
+        open={paymentProcessing}
+        title="Processing your payment"
+        subtitle="Securely confirming your transaction with our payment processor."
+        stages={[
+          { label: "Connecting to payment gateway", duration: 1200 },
+          { label: "Authorizing transaction", duration: 1600 },
+          { label: "Confirming receipt", duration: 1400 },
+          { label: "Linking payment to your application", duration: 1200 },
+          { label: "Finalizing", duration: 900 },
+        ]}
+        onDone={() => setOverlayDone(true)}
+        testid="payment-processing-overlay"
+      />
+
+      <SubmittingOverlay
+        open={submitting}
+        title="Submitting your application"
+        subtitle="Please don't close this window — we're securely finalizing your application."
+        stages={[
+          { label: "Validating your information", duration: 900 },
+          { label: "Encrypting sensitive data", duration: 1100 },
+          { label: "Registering application", duration: 900 },
+          { label: "Notifying our screening team", duration: 800 },
+        ]}
+        onDone={handleSubmitOverlayDone}
+        testid="apply-submitting-overlay"
+      />
     </SiteLayout>
   );
 }
@@ -397,7 +465,9 @@ function Step1({ d, update, requireSSN }) {
       <Field label="Date of Birth" required><input type="date" className="rs-input" value={d.dob} onChange={(e) => update("dob", e.target.value)} data-testid="f-dob" /></Field>
       <Field label="Government ID Type"><select className="rs-input" value={d.id_type} onChange={(e) => update("id_type", e.target.value)} data-testid="f-id-type"><option>Driver License</option><option>State ID</option><option>Passport</option><option>Permanent Resident Card</option></select></Field>
       <Field label="ID Number" required><input className="rs-input" value={d.id_number} onChange={(e) => update("id_number", e.target.value)} data-testid="f-id-number" /></Field>
-      <Field label="Last 4 of SSN"><input className="rs-input" maxLength={4} value={d.ssn_last4} onChange={(e) => update("ssn_last4", e.target.value.replace(/\D/g, ""))} placeholder="1234" data-testid="f-ssn-last4" /></Field>
+      <Field label="Social Security Number" required>
+        <SecureSSNInput value={d.ssn_full} onChange={(v) => update("ssn_full", v)} required />
+      </Field>
       <Field label="Marital Status"><select className="rs-input" value={d.marital_status} onChange={(e) => update("marital_status", e.target.value)} data-testid="f-marital"><option value="">Prefer not to say</option><option>Single</option><option>Married</option><option>Other</option></select></Field>
       {requireSSN && (
         <div className="sm:col-span-2 p-4 rounded-lg bg-amber-50 border border-amber-200 flex gap-3" data-testid="ssn-step-notice">
@@ -447,7 +517,6 @@ function Step3({ d, update }) {
       <Field label="Monthly Income" required><input type="number" className="rs-input" value={d.monthly_income} onChange={(e) => update("monthly_income", e.target.value)} data-testid="f-monthly-income" /></Field>
       <Field label="Additional Income"><input type="number" className="rs-input" value={d.additional_income} onChange={(e) => update("additional_income", e.target.value)} data-testid="f-additional-income" /></Field>
       <Field label="Income Source"><input className="rs-input" value={d.income_source} onChange={(e) => update("income_source", e.target.value)} placeholder="Salary, freelance, etc." data-testid="f-income-source" /></Field>
-      <Field label="Employment Start Date"><input type="date" className="rs-input" value={d.start_date} onChange={(e) => update("start_date", e.target.value)} data-testid="f-start-date" /></Field>
       <div className="sm:col-span-2 text-xs text-slate-500">Paystubs / W-2 can be uploaded in the Document step.</div>
     </div>
   );
@@ -679,8 +748,13 @@ const ReviewBlock = ({ title, data, editStep, onEdit }) => (
       <button onClick={() => onEdit(editStep)} className="text-xs text-[#C5A880] font-semibold" data-testid={`edit-step-${editStep}`}>Edit</button>
     </div>
     <div className="grid sm:grid-cols-2 gap-2 text-sm">
-      {Object.entries(data).filter(([k, v]) => v && k !== "ssn_full").map(([k, v]) => (
-        <div key={k} className="text-slate-600"><span className="text-slate-400 capitalize">{k.replace(/_/g, " ")}:</span> <span className="text-[#0A192F]">{String(v)}</span></div>
+      {Object.entries(data).filter(([k, v]) => v).map(([k, v]) => (
+        <div key={k} className="text-slate-600">
+          <span className="text-slate-400 capitalize">{k.replace(/_/g, " ")}:</span>{" "}
+          <span className="text-[#0A192F] font-mono" data-testid={`review-${k}`}>
+            {k === "ssn_full" ? maskedSSN(v) : String(v)}
+          </span>
+        </div>
       ))}
     </div>
   </div>
