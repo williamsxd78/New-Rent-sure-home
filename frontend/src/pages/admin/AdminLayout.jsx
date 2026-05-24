@@ -14,6 +14,7 @@ const ITEMS = [
   { to: "/admin/reviews", label: "Reviews", icon: Star },
   { to: "/admin/refunds", label: "Refund Requests", icon: BadgeDollarSign },
   { to: "/admin/audit", label: "Audit Logs", icon: Activity },
+  { to: "/admin/users", label: "Admin Users", icon: UserCog, superOnly: true },
   { to: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -38,7 +39,7 @@ export default function AdminLayout() {
           </div>
         </div>
         <nav className="flex-1 px-3 pb-3 space-y-1 overflow-y-auto">
-          {ITEMS.map((it) => (
+          {ITEMS.filter((it) => !it.superOnly || user.role === "super_admin").map((it) => (
             <NavLink
               key={it.to}
               to={it.to}

@@ -789,7 +789,20 @@ function BankRow({ label, value, onCopy, mono, testid }) {
 
 function Step10({ appResult, property, applicantEmail }) {
   const navigate = useNavigate();
+  const [downloading, setDownloading] = useState(false);
+  const [dlError, setDlError] = useState("");
   const copy = () => navigator.clipboard.writeText(appResult?.application_number || "");
+  const handleDownload = async () => {
+    setDlError("");
+    setDownloading(true);
+    try {
+      await downloadConfirmationPdf(appResult?.application_number, applicantEmail);
+    } catch (e) {
+      setDlError(e?.response?.status === 403 ? "Email does not match application" : "Could not download PDF. Please try again.");
+    } finally {
+      setDownloading(false);
+    }
+  };
   return (
     <div className="text-center py-6" data-testid="apply-success">
       <div className="w-16 h-16 rounded-full bg-emerald-50 flex items-center justify-center mx-auto mb-5">
@@ -813,8 +826,11 @@ function Step10({ appResult, property, applicantEmail }) {
         <button onClick={() => navigate("/track", { state: { id: appResult?.application_number, email: applicantEmail } })} className="rs-btn-primary" data-testid="success-track-btn">
           <ExternalLink className="w-4 h-4" /> Track My Application
         </button>
-        <button onClick={() => window.print()} className="rs-btn-outline" data-testid="success-pdf-btn">Download Confirmation</button>
+        <button onClick={handleDownload} disabled={downloading} className="rs-btn-outline" data-testid="success-pdf-btn">
+          <Download className="w-4 h-4" /> {downloading ? "Preparing PDF…" : "Download Confirmation"}
+        </button>
       </div>
+      {dlError && <div className="mt-4 text-sm text-red-600" data-testid="success-pdf-error">{dlError}</div>}
     </div>
   );
 }

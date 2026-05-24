@@ -28,6 +28,7 @@ import AdminReviewsPage from "@/pages/admin/AdminReviewsPage";
 import AdminRefundsPage from "@/pages/admin/AdminRefundsPage";
 import AdminAuditPage from "@/pages/admin/AdminAuditPage";
 import AdminSettingsPage from "@/pages/admin/AdminSettingsPage";
+import AdminUsersPage from "@/pages/admin/AdminUsersPage";
 
 const POLICIES = [
   "privacy", "terms", "refund", "application-fee", "fair-housing",
@@ -65,6 +66,7 @@ function App() {
               <Route path="reviews" element={<AdminReviewsPage />} />
               <Route path="refunds" element={<AdminRefundsPage />} />
               <Route path="audit" element={<AdminAuditPage />} />
+              <Route path="users" element={<AdminUsersPage />} />
               <Route path="settings" element={<AdminSettingsPage />} />
             </Route>
           </Routes>

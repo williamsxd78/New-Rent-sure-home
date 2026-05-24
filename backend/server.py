@@ -28,6 +28,7 @@ from storage import init_storage, put_object, get_object, build_path, APP_NAME
 from seed import run_seed
 from paypal_client import PayPalClient, get_paypal_config, find_approve_url
 from email_service import send_templated, send_test_email as send_smtp_test
+from pdf_service import build_application_confirmation_pdf
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -504,6 +505,55 @@ async def track(payload: TrackIn):
     return appdoc
 
 
+# ------------------ Public Contact / Support ------------------
+@api.post("/contact")
+async def submit_contact_message(payload: dict, request: Request):
+    name = (payload.get("name") or "").strip()
+    email = (payload.get("email") or "").strip().lower()
+    message = (payload.get("message") or "").strip()
+    if not name or not email or not message:
+        raise HTTPException(400, "Name, email and message are required")
+    if len(message) > 2000:
+        raise HTTPException(400, "Message too long (max 2000 characters)")
+    mid = str(uuid.uuid4())
+    await db.support_messages.insert_one({
+        "id": mid,
+        "name": name,
+        "email": email,
+        "message": message,
+        "source": "support_widget",
+        "status": "open",
+        "user_agent": request.headers.get("user-agent", "")[:300],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"id": mid, "status": "received"}
+
+
+# ------------------ Confirmation PDF ------------------
+@api.get("/applications/{application_id}/confirmation-pdf")
+async def application_confirmation_pdf(application_id: str, email: str = Query(...)):
+    """Public download of a branded confirmation PDF. Email must match application."""
+    q = {"$or": [
+        {"application_number": application_id.upper().strip()},
+        {"id": application_id.strip()},
+    ]}
+    appdoc = await db.applications.find_one(q, {"_id": 0})
+    if not appdoc:
+        raise HTTPException(404, "Application not found")
+    if appdoc.get("applicant_email", "").lower() != email.strip().lower():
+        raise HTTPException(403, "Email does not match application")
+    appdoc.pop("internal_notes", None)
+    appdoc.pop("ssn_full_doc_path", None)
+    prop = await db.properties.find_one({"id": appdoc["property_id"]}, {"_id": 0}) or {}
+    pdf_bytes = await asyncio.to_thread(build_application_confirmation_pdf, appdoc, prop)
+    filename = f"RentSure-Confirmation-{appdoc.get('application_number', 'application')}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # ------------------ Refund Request ------------------
 @api.post("/refund-requests")
 async def refund_request(payload: RefundRequestIn):
@@ -553,6 +603,8 @@ async def login(payload: LoginIn):
     user = await db.admin_users.find_one({"email": payload.email.lower()}, {"_id": 0})
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password")
+    if user.get("active") is False:
+        raise HTTPException(403, "This admin account has been deactivated")
     token = create_access_token(user["id"], user["email"], user["role"])
     return {
         "access_token": token,
@@ -587,6 +639,108 @@ async def dashboard(admin=Depends(require_admin)):
         "refund_requests": await db.refund_requests.count_documents({"status": "open"}),
         "new_messages": 0,
     }
+
+
+# ------------------ Admin: User Management (super_admin only) ------------------
+ADMIN_ROLES = {"super_admin", "manager", "document_reviewer", "support"}
+
+
+@api.get("/admin/users")
+async def list_admin_users(admin=Depends(require_super_admin)):
+    users = await db.admin_users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
+    users.sort(key=lambda u: u.get("created_at", ""))
+    return users
+
+
+@api.post("/admin/users")
+async def create_admin_user(payload: dict, admin=Depends(require_super_admin)):
+    name = (payload.get("name") or "").strip()
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    role = (payload.get("role") or "manager").strip()
+    if not name or not email or not password:
+        raise HTTPException(400, "Name, email and password are required")
+    if role not in ADMIN_ROLES:
+        raise HTTPException(400, f"Invalid role. Must be one of: {sorted(ADMIN_ROLES)}")
+    if len(password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+    existing = await db.admin_users.find_one({"email": email})
+    if existing:
+        raise HTTPException(409, "An admin with this email already exists")
+    uid = str(uuid.uuid4())
+    doc = {
+        "id": uid,
+        "name": name,
+        "email": email,
+        "role": role,
+        "password_hash": hash_password(password),
+        "active": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": admin["email"],
+    }
+    await db.admin_users.insert_one(doc)
+    doc.pop("password_hash", None)
+    doc.pop("_id", None)
+    return doc
+
+
+@api.patch("/admin/users/{user_id}")
+async def update_admin_user(user_id: str, payload: dict, admin=Depends(require_super_admin)):
+    user = await db.admin_users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "User not found")
+    updates = {}
+    if "name" in payload:
+        updates["name"] = (payload["name"] or "").strip() or user["name"]
+    if "role" in payload:
+        if payload["role"] not in ADMIN_ROLES:
+            raise HTTPException(400, "Invalid role")
+        # Safeguard: prevent demoting the last active super_admin
+        if user.get("role") == "super_admin" and payload["role"] != "super_admin":
+            others = await db.admin_users.count_documents({"role": "super_admin", "active": True, "id": {"$ne": user_id}})
+            if others == 0:
+                raise HTTPException(400, "Cannot demote the last active super admin")
+        updates["role"] = payload["role"]
+    if "active" in payload:
+        if user.get("role") == "super_admin" and not payload["active"]:
+            others = await db.admin_users.count_documents({"role": "super_admin", "active": True, "id": {"$ne": user_id}})
+            if others == 0:
+                raise HTTPException(400, "Cannot deactivate the last active super admin")
+        updates["active"] = bool(payload["active"])
+    if "password" in payload and payload["password"]:
+        if len(payload["password"]) < 8:
+            raise HTTPException(400, "Password must be at least 8 characters")
+        updates["password_hash"] = hash_password(payload["password"])
+    if not updates:
+        raise HTTPException(400, "No updates provided")
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    updates["updated_by"] = admin["email"]
+    await db.admin_users.update_one({"id": user_id}, {"$set": updates})
+    out = await db.admin_users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    return out
+
+
+@api.delete("/admin/users/{user_id}")
+async def delete_admin_user(user_id: str, admin=Depends(require_super_admin)):
+    if user_id == admin["id"]:
+        raise HTTPException(400, "You cannot delete your own account")
+    user = await db.admin_users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(404, "User not found")
+    if user.get("role") == "super_admin":
+        others = await db.admin_users.count_documents({"role": "super_admin", "active": True, "id": {"$ne": user_id}})
+        if others == 0:
+            raise HTTPException(400, "Cannot delete the last active super admin")
+    await db.admin_users.delete_one({"id": user_id})
+    return {"status": "deleted", "id": user_id}
+
+
+# ------------------ Admin: Support Messages ------------------
+@api.get("/admin/support-messages")
+async def admin_list_support_messages(admin=Depends(require_admin)):
+    msgs = await db.support_messages.find({}, {"_id": 0}).to_list(500)
+    msgs.sort(key=lambda m: m.get("created_at", ""), reverse=True)
+    return msgs
 
 
 # ------------------ Admin: Properties CRUD ------------------
@@ -651,6 +805,66 @@ async def admin_list_applications(
         _mask_ssn_doc_path(a, admin.get("role"))
     items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return items
+
+
+@api.get("/admin/applications/export.csv")
+async def admin_export_applications_csv(
+    status: Optional[str] = None, q: Optional[str] = None, admin=Depends(require_admin)
+):
+    """Export current applications view as a CSV file."""
+    import csv
+    from io import StringIO
+    query = {}
+    if status:
+        query["decision"] = status
+    if q:
+        query["$or"] = [
+            {"applicant_name": {"$regex": q, "$options": "i"}},
+            {"applicant_email": {"$regex": q, "$options": "i"}},
+            {"application_number": {"$regex": q, "$options": "i"}},
+        ]
+    items = await db.applications.find(query, {"_id": 0}).to_list(5000)
+    prop_ids = list({a["property_id"] for a in items})
+    props = await db.properties.find({"id": {"$in": prop_ids}}, {"_id": 0}).to_list(2000)
+    prop_map = {p["id"]: p for p in props}
+
+    buf = StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "Application ID", "Submitted", "Applicant Name", "Email", "Phone",
+        "Property", "City", "State", "Monthly Rent", "Application Fee",
+        "Payment Status", "Payment Method", "Transaction ID", "Decision",
+        "Decision Note", "Created At", "Updated At",
+    ])
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    for a in items:
+        p = prop_map.get(a.get("property_id"), {})
+        pay = a.get("payment") or {}
+        w.writerow([
+            a.get("application_number", ""),
+            a.get("submitted_at") or a.get("created_at", ""),
+            a.get("applicant_name", ""),
+            a.get("applicant_email", ""),
+            a.get("applicant_phone", ""),
+            p.get("title", ""),
+            p.get("city", ""),
+            p.get("state", ""),
+            p.get("rent", ""),
+            p.get("application_fee", ""),
+            pay.get("status", ""),
+            pay.get("method") or pay.get("mode", ""),
+            pay.get("transaction_id", ""),
+            a.get("decision", ""),
+            (a.get("decision_note") or "").replace("\n", " "),
+            a.get("created_at", ""),
+            a.get("updated_at", ""),
+        ])
+    filename = f"rentsure-applications-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @api.get("/admin/applications/{app_id}")

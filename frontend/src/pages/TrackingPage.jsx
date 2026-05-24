@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
-import { api, STAGE_LABELS, DECISION_LABELS } from "@/lib/api";
-import { Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare, Info } from "lucide-react";
+import { api, STAGE_LABELS, DECISION_LABELS, downloadConfirmationPdf } from "@/lib/api";
+import { Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare, Info, Download } from "lucide-react";
 
 const ICONS = {
   completed: CheckCircle2,
@@ -177,6 +177,34 @@ function TrackingResult({ data }) {
         <div className="rs-card p-5 flex items-center gap-3"><Mail className="w-5 h-5 text-[#C5A880]" /><div><div className="text-xs text-slate-500">Email</div><div className="text-sm text-[#0A192F]">{data.applicant_email}</div></div></div>
         <div className="rs-card p-5 flex items-center gap-3"><MessageSquare className="w-5 h-5 text-[#C5A880]" /><div><div className="text-xs text-slate-500">Messages</div><div className="text-sm text-[#0A192F]">{data.messages?.length || 0} from admin</div></div></div>
       </div>
+
+      <DownloadConfirmation appNumber={data.application_number} email={data.applicant_email} />
+    </div>
+  );
+}
+
+function DownloadConfirmation({ appNumber, email }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const handle = async () => {
+    setErr("");
+    setBusy(true);
+    try {
+      await downloadConfirmationPdf(appNumber, email);
+    } catch (e) {
+      setErr(e?.response?.status === 403 ? "Email mismatch — cannot download" : "Could not download PDF. Please try again.");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-6 rs-card p-5 flex flex-wrap items-center justify-between gap-3" data-testid="tracking-download-card">
+      <div>
+        <div className="font-display font-semibold text-[#0A192F]">Confirmation receipt</div>
+        <div className="text-xs text-slate-500">Download a PDF copy of this application for your records.</div>
+        {err && <div className="text-xs text-red-600 mt-1" data-testid="tracking-download-error">{err}</div>}
+      </div>
+      <button onClick={handle} disabled={busy} className="rs-btn-outline" data-testid="tracking-download-btn">
+        <Download className="w-4 h-4" /> {busy ? "Preparing PDF…" : "Download PDF"}
+      </button>
     </div>
   );
 }

@@ -169,8 +169,13 @@ async def seed_admin(db):
             "name": "Super Admin",
             "role": "super_admin",
             "password_hash": hash_password(admin_password),
+            "active": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
+    else:
+        # Back-fill `active` on existing seed (idempotent)
+        if "active" not in existing:
+            await db.admin_users.update_one({"id": existing["id"]}, {"$set": {"active": True}})
 
 
 async def seed_properties(db):

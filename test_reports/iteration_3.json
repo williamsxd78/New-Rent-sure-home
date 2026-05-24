@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 3 — Verified P0 Bank Transfer + new P1/P2 features (Confirmation PDF, CSV export, Contact widget, Admin Users CRUD). Authored /app/backend/tests/test_iteration3.py with 22 new tests covering all new endpoints (4 bank-transfer, 3 pdf, 3 csv, 3 contact, 9 admin-users). 22/22 NEW PASS. Full regression: 75/76 pass (only failure is pre-existing test_rentsure.py::test_upload_ssn_doc, NOT a code bug — test uses doc_type='ssn_card' but server expects 'ssn document' or 'ssn verification'; not introduced this iteration). Frontend smoke verified: SupportWidget launcher/panel/send on Home & Properties (end-to-end submission shows 'Message sent' success state), tracking-download-btn appears on /track after fetch of APP-26C458EF, /admin/users renders with create-user-modal opening, export-csv-btn present on /admin/applications.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/payments/bank-transfer", "issue": "When transaction_id is empty string, FastAPI Form(...) accepts it (no 422), so code raises 400 — consistent with spec but reliance on .strip() is fragile; consider min_length=1 in Form param."},
+      {"endpoint": "POST /api/contact", "issue": "Uses raw `payload: dict` instead of a Pydantic model — loses input-validation hardening (no type check on name/email/message, no email regex, no CORS/abuse rate-limit). Consider a ContactIn Pydantic schema."},
+      {"endpoint": "GET /api/applications/{id}/confirmation-pdf", "issue": "Endpoint is fully public — anyone who knows app_id+email can download. Acceptable for confirmation use case but no per-IP throttling exists; treat email as a low-strength secret."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3.py",
+    "/app/test_reports/pytest/iter3.xml"
+  ],
+  "action_items": [
+    "(Optional) Replace `payload: dict` in /api/contact with a Pydantic ContactIn(name, email: EmailStr, message: constr(min_length=1, max_length=2000)) for stricter validation and to keep FastAPI's auto OpenAPI schema honest.",
+    "(Optional) Add basic rate-limiting / captcha on /api/contact and /api/applications/{id}/confirmation-pdf — both are public, unauthenticated POST/GET surfaces.",
+    "(Pre-existing, not new) /app/backend/tests/test_rentsure.py::TestApplicationFlow::test_upload_ssn_doc — test asserts is_sensitive=True for doc_type='ssn_card', but server only flags 'ssn document'/'ssn verification' as sensitive. Either update test to use 'ssn verification' OR widen server detection. Has been failing since iteration 1/2."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~1220 lines — strongly recommend splitting into routers/ (admin_users, payments, public_contact, pdf). Already flagged in iter2; pressure increases each iteration.",
+    "Admin user PATCH does not allow self-changes safeguards: a super_admin CAN change their own role/active via PATCH (only the 'last super_admin' guard kicks in). Consider explicit guard against self-deactivation parallel to delete-self guard.",
+    "/api/admin/users password is stored as bcrypt via hash_password — good. PATCH response correctly strips password_hash. Verified via test test_patch_role_and_password.",
+    "pdf_service.build_application_confirmation_pdf is called via asyncio.to_thread — good (reportlab is sync, would block event loop otherwise).",
+    "CSV export: csv.writer + StringIO works fine but for large exports (>5000 rows currently capped) consider StreamingResponse to avoid memory bloat.",
+    "SupportWidget reuses data-testid='support-email' on a <a mailto:> AND uses data-testid='support-email-input' on the form <input>. Distinct keys, so no real collision, but the naming is slightly confusing — consider renaming the anchor to 'support-email-link'.",
+    "/api/contact stores user-agent (truncated to 300) but not IP — fine for privacy but limits abuse-tracing.",
+    "Bank transfer endpoint does not validate transaction_id format (length, charset). A malicious applicant could submit arbitrary strings up to FastAPI default form limit. Consider regex/length cap."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3.py (NEW — 22 tests)"
+  ],
+  "success_rate": {"backend": "100% (22/22 new tests) — full suite 75/76 (1 pre-existing test bug)", "frontend": "100% of requested testids/flows verified"},
+  "test_credentials": "Admin: admin@rentsurehomes.com / Admin@123 (super_admin). Seeded application for PDF/Track: APP-26C458EF / alex.carter@example.com",
+  "seed_data_creation": "Tests create one TEST_BT_* application (not cleaned, retained for trace), one transient admin user (auto-deleted via class teardown fixture), one TEST_Support contact message in db.support_messages, plus one ui_send@test.com contact message via UI smoke. None impact super_admin or production seed data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 3 added 22 tests in /app/backend/tests/test_iteration3.py covering Bank Transfer + Confirmation PDF + CSV export + /api/contact + /api/admin/users CRUD. Run with: pytest /app/backend/tests/test_iteration3.py -v. Full regression: pytest /app/backend/tests/ -v (75 pass, 1 stale test_upload_ssn_doc fails — pre-existing). Admin Users teardown fixture deletes any TEST_Admin user it created. The 'last super_admin' protection is tested via test_cannot_demote_last_super_admin which auto-skips if more than one super_admin exists in DB. Frontend confirmed working: support widget submits successfully with success state 'Message sent'; tracking-download-btn appears after /track fetch; admin/users page renders for super_admin with create-user-modal opening; export-csv-btn visible on admin/applications. ApplyPage Step10 download (binary blob via downloadConfirmationPdf in /app/frontend/src/lib/api.js) was not exercised through the full 10-step apply flow (too lengthy), but the helper function is the same as the one used by the verified Track-page button, so it should work — main agent could self-test by running the apply flow once.",
+  "rca of the issue": "No new bugs. Pre-existing test_upload_ssn_doc failure RCA: server.py line 270 detects sensitive SSN docs only when doc_type.lower() in {'ssn document','ssn verification'}, but the test uploads with doc_type='ssn_card' which does not match. Fix is one of: (a) update test to use 'ssn verification' as doc_type, or (b) add 'ssn_card', 'ssn card' to the server's sensitive set. Recommend (b) for defense-in-depth."
+}

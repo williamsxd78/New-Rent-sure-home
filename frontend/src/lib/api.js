@@ -17,6 +17,26 @@ api.interceptors.request.use((config) => {
 export const formatMoney = (n) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n || 0);
 
+/**
+ * Download the branded application confirmation PDF.
+ * Triggers a real browser download (binary blob).
+ */
+export const downloadConfirmationPdf = async (applicationId, email) => {
+  if (!applicationId || !email) throw new Error("Application ID and email are required");
+  const r = await api.get(`/applications/${encodeURIComponent(applicationId)}/confirmation-pdf`, {
+    params: { email },
+    responseType: "blob",
+  });
+  const url = window.URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `RentSure-Confirmation-${applicationId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => window.URL.revokeObjectURL(url), 1500);
+};
+
 export const STAGE_LABELS = {
   application_submitted: "Application Submitted",
   payment_received: "Payment Received",

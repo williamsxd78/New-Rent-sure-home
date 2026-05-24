@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api, formatMoney, BACKEND_URL, SCREENING_LABELS, DECISION_LABELS, STATUS_BADGE } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X, Lock, Download, ImageIcon } from "lucide-react";
+import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X, Lock, Download, ImageIcon, FileDown } from "lucide-react";
 
 const SCREENING_KEYS = ["identity_verification", "income_verification", "credit_report", "background_check", "criminal_record", "rental_history", "final_review"];
 
@@ -22,6 +22,20 @@ export default function AdminApplicationsPage() {
   const load = async () => {
     const r = await api.get("/admin/applications", { params: q ? { q } : {} });
     setItems(r.data);
+  };
+
+  const [exporting, setExporting] = useState(false);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const r = await api.get("/admin/applications/export.csv", { params: q ? { q } : {}, responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([r.data], { type: "text/csv" }));
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      a.href = url; a.download = `rentsure-applications-${ts}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    } finally { setExporting(false); }
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
@@ -58,6 +72,9 @@ export default function AdminApplicationsPage() {
             <input className="rs-input pl-9 !py-2" placeholder="Search by name, email, ID" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} data-testid="search-applications" />
           </div>
           <button onClick={load} className="rs-btn-primary !py-2">Search</button>
+          <button onClick={exportCsv} disabled={exporting || items.length === 0} className="rs-btn-outline !py-2 disabled:opacity-50" data-testid="export-csv-btn" title="Export current view to CSV">
+            <FileDown className="w-4 h-4" /> {exporting ? "Exporting…" : "Export CSV"}
+          </button>
         </div>
       </div>
 

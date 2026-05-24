@@ -1,6 +1,7 @@
 import React from "react";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
+import SupportWidget from "./SupportWidget";
 
 export default function SiteLayout({ children }) {
   return (
@@ -8,6 +9,7 @@ export default function SiteLayout({ children }) {
       <Navbar />
       <main className="flex-1">{children}</main>
       <Footer />
+      <SupportWidget />
     </div>
   );
 }
