@@ -31,18 +31,21 @@ Create a professional, premium, trust-focused rental property application and te
 - 9 Policy pages (Privacy, Terms, Refund, Application Fee, Fair Housing, Screening Disclosure, FCRA, E-signature, Data Retention)
 
 ## Implemented (Feb 2026)
-- ✅ All backend endpoints (37/37 backend tests passing)
+- ✅ All backend endpoints (54/54 backend tests passing including 17 new for PayPal/SMTP integration)
 - ✅ All public site pages with responsive design + brand consistency
 - ✅ 10-step application wizard with progress bar, auto-save, validation, edit-on-review
 - ✅ Document upload (PDF/JPG/PNG, 10MB limit, SSN-secure category)
-- ✅ PayPal demo flow (init → capture → paid status + timeline update)
+- ✅ **PayPal: admin-configurable** (Demo / Sandbox / Live) via `/admin/settings` — credentials saved in MongoDB, no env/restart needed. Real PayPal Orders v2 API integration (OAuth → create order → user redirects to approve_url → return to `/payment/return` → capture). Test-connection endpoint. Demo mode still default.
+- ✅ **SMTP: admin-configurable** with enable toggle, host/port/username/password/from_email/use_tls, "Send Test Email" button. Auto-emails on application submitted, payment received, and decision update (approved / not_qualified / more_info_needed). Soft-fails when SMTP disabled.
 - ✅ Tracking page with 11-stage timeline, NOT QUALIFIED watermark, Pre-Approved success card
 - ✅ Admin login (JWT, super_admin seeded on startup) + sidebar layout
 - ✅ Admin dashboard, properties CRUD, applications detail modal (Overview/Screening/Documents/Payment/Decision/Messages tabs)
-- ✅ Admin reviews CRUD, refund-request management, audit logs, settings (SMTP placeholder + SSN handling)
+- ✅ Admin reviews CRUD, refund-request management, audit logs, settings (PayPal + SMTP + SSN handling, all live-configurable)
 - ✅ Audit log on full SSN view (super_admin only with reason)
+- ✅ Secret masking in settings GET response (`*_set` boolean indicator); PUT preserves existing secrets when frontend sends blank
 - ✅ 9 Policy pages with template content + attorney-review disclaimer
-- ✅ Rich seed data: 12 properties (different US cities), 3 sample reviews, 4 demo applications across decision states
+- ✅ Rich seed data: 12 properties, 3 sample reviews, 4 demo applications across decision states
+- ✅ Idempotent payment init (won't reset a paid application)
 
 ## Prioritized Backlog (P1/P2)
 - **P1** Real PayPal integration (replace demo capture with PayPal SDK using stored client_id/secret)

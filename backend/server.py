@@ -286,6 +286,16 @@ async def payment_init(payload: PaymentInit, request: Request):
     if not appdoc:
         raise HTTPException(404, "Application not found")
 
+    # Idempotency: don't reset a paid application
+    if appdoc.get("payment", {}).get("status") == "paid":
+        return {
+            "mode": appdoc.get("payment", {}).get("mode", "demo"),
+            "order_id": appdoc.get("payment", {}).get("order_id"),
+            "approve_url": None,
+            "amount": payload.amount,
+            "already_paid": True,
+        }
+
     cfg = await get_paypal_config(db)
     origin = request.headers.get("origin") or os.environ.get("FRONTEND_URL", "")
 
