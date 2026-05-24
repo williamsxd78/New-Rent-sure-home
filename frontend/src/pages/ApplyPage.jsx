@@ -141,13 +141,20 @@ export default function ApplyPage() {
   const handlePay = async () => {
     if (!appResult) return;
     try {
-      await api.post("/payments/init", { application_id: appResult.id, amount: appResult.application_fee, method: "paypal" });
-      // simulate PayPal redirect & capture
-      const fd = new FormData();
-      fd.append("application_id", appResult.id);
-      fd.append("order_id", "DEMO");
-      await api.post("/payments/capture", fd);
-      setPaymentDone(true);
+      const r = await api.post("/payments/init", { application_id: appResult.id, amount: appResult.application_fee, method: "paypal" });
+      const mode = r.data.mode;
+      if (mode === "demo") {
+        // Demo flow: capture immediately
+        const fd = new FormData();
+        fd.append("application_id", appResult.id);
+        fd.append("order_id", r.data.order_id);
+        await api.post("/payments/capture", fd);
+        setPaymentDone(true);
+        return;
+      }
+      // Real PayPal — persist state and redirect to PayPal
+      localStorage.setItem(`rs_pp_state_${propertyId}`, JSON.stringify({ app_id: appResult.id, app_number: appResult.application_number, application_fee: appResult.application_fee, step: 8 }));
+      window.location.href = r.data.approve_url;
     } catch (e) { setError("Payment failed: " + (e?.response?.data?.detail || "")); }
   };
 

@@ -165,7 +165,7 @@ class TestApplicationFlow:
         r = session.post(f"{API}/payments/init", json={"application_id": app_data["id"], "amount": 65, "method": "paypal"})
         assert r.status_code == 200
         d = r.json()
-        assert d["order_id"].startswith("PP-ORDER-")
+        assert d["order_id"].startswith("PP-DEMO-")
         # Capture via form
         r2 = requests.post(f"{API}/payments/capture", data={"application_id": app_data["id"], "order_id": d["order_id"]})
         assert r2.status_code == 200

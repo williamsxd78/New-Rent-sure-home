@@ -14,6 +14,8 @@ import AboutPage from "@/pages/AboutPage";
 import ContactPage from "@/pages/ContactPage";
 import ReviewsPage from "@/pages/ReviewsPage";
 import PolicyPage from "@/pages/PolicyPage";
+import PaymentReturnPage from "@/pages/PaymentReturnPage";
+import PaymentCancelPage from "@/pages/PaymentCancelPage";
 
 import AdminLoginPage from "@/pages/AdminLoginPage";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -42,6 +44,8 @@ function App() {
             <Route path="/properties/:id" element={<PropertyDetailsPage />} />
             <Route path="/apply/:propertyId" element={<ApplyPage />} />
             <Route path="/track" element={<TrackingPage />} />
+            <Route path="/payment/return" element={<PaymentReturnPage />} />
+            <Route path="/payment/cancel" element={<PaymentCancelPage />} />
             <Route path="/how-it-works" element={<HowItWorksPage />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="/contact" element={<ContactPage />} />

@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Header, Request
 from fastapi.responses import Response, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -25,6 +25,8 @@ from models import (
 )
 from storage import init_storage, put_object, get_object, build_path, APP_NAME
 from seed import run_seed
+from paypal_client import PayPalClient, get_paypal_config, find_approve_url
+from email_service import send_templated, send_test_email as send_smtp_test
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -199,6 +201,18 @@ async def create_application(payload: ApplicationCreate):
         "submitted_at": now,
     }
     await db.applications.insert_one(doc)
+
+    # Fire-and-forget email (soft-fail if SMTP unconfigured)
+    try:
+        await send_templated(db, "application_submitted", applicant_email, {
+            "name": applicant_name,
+            "property_name": prop.get("title", ""),
+            "application_number": app_number,
+            "tracking_url": "",
+        })
+    except Exception as e:
+        logger.warning(f"Email failed: {e}")
+
     return {"id": app_id, "application_number": app_number, "application_fee": prop.get("application_fee", 50)}
 
 
@@ -246,29 +260,103 @@ async def upload_doc(app_id: str, doc_type: str = Form(...), file: UploadFile = 
     return doc_entry
 
 
-# ------------------ Payment (PayPal demo) ------------------
+# ------------------ Payment (PayPal real + demo) ------------------
+async def _send_app_emails(app_doc, prop, kind, request_origin=None):
+    """Fire-and-forget email notification."""
+    try:
+        tracking_url = ""
+        if request_origin:
+            tracking_url = f"{request_origin}/track"
+        await send_templated(db, kind, app_doc.get("applicant_email") or "", {
+            "name": app_doc.get("applicant_name", "Applicant"),
+            "property_name": (prop or {}).get("title", "your property"),
+            "application_number": app_doc.get("application_number", ""),
+            "tracking_url": tracking_url,
+            "amount": f"${app_doc.get('payment', {}).get('amount', 0):.2f}",
+            "transaction_id": app_doc.get("payment", {}).get("transaction_id", ""),
+            "applicant_message": app_doc.get("applicant_message", ""),
+        })
+    except Exception as e:
+        logger.warning(f"Email send failed: {e}")
+
+
 @api.post("/payments/init")
-async def payment_init(payload: PaymentInit):
+async def payment_init(payload: PaymentInit, request: Request):
     appdoc = await db.applications.find_one({"id": payload.application_id}, {"_id": 0})
     if not appdoc:
         raise HTTPException(404, "Application not found")
-    # Demo PayPal — return order id
-    order_id = f"PP-ORDER-{uuid.uuid4().hex[:12].upper()}"
+
+    cfg = await get_paypal_config(db)
+    origin = request.headers.get("origin") or os.environ.get("FRONTEND_URL", "")
+
+    # Demo mode (default if no config)
+    if not cfg or cfg.get("mode") == "demo":
+        order_id = f"PP-DEMO-{uuid.uuid4().hex[:12].upper()}"
+        await db.applications.update_one(
+            {"id": payload.application_id},
+            {"$set": {"payment.status": "initiated", "payment.method": "paypal_demo", "payment.order_id": order_id}},
+        )
+        return {"mode": "demo", "order_id": order_id, "approve_url": None, "amount": payload.amount}
+
+    # Real PayPal (sandbox or live)
+    return_url = f"{origin}/payment/return?app_id={payload.application_id}"
+    cancel_url = f"{origin}/payment/cancel?app_id={payload.application_id}"
+    try:
+        cli = PayPalClient(cfg["mode"], cfg["client_id"], cfg["client_secret"])
+        order = cli.create_order(
+            amount=payload.amount, currency="USD",
+            return_url=return_url, cancel_url=cancel_url,
+            custom_id=appdoc.get("application_number", payload.application_id),
+        )
+    except Exception as e:
+        logger.error(f"PayPal init failed: {e}")
+        raise HTTPException(502, f"PayPal error: {e}")
+
+    approve_url = find_approve_url(order)
+    if not approve_url:
+        raise HTTPException(502, "PayPal: no approve URL returned")
+
     await db.applications.update_one(
         {"id": payload.application_id},
-        {"$set": {"payment.status": "initiated", "payment.method": payload.method, "payment.order_id": order_id}},
+        {"$set": {"payment.status": "initiated", "payment.method": f"paypal_{cfg['mode']}", "payment.order_id": order["id"]}},
     )
-    return {"order_id": order_id, "approve_url": f"#paypal-demo/{order_id}", "amount": payload.amount}
+    return {"mode": cfg["mode"], "order_id": order["id"], "approve_url": approve_url, "amount": payload.amount}
 
 
 @api.post("/payments/capture")
-async def payment_capture(application_id: str = Form(...), order_id: str = Form(...)):
+async def payment_capture(request: Request, application_id: str = Form(...), order_id: str = Form(...)):
     appdoc = await db.applications.find_one({"id": application_id}, {"_id": 0})
     if not appdoc:
         raise HTTPException(404, "Application not found")
-    txn_id = f"PP-DEMO-{uuid.uuid4().hex[:10].upper()}"
+
+    # Idempotency: already paid
+    if appdoc.get("payment", {}).get("status") == "paid":
+        return {"status": "paid", "transaction_id": appdoc["payment"].get("transaction_id"), "already": True}
+
+    cfg = await get_paypal_config(db)
     now = datetime.now(timezone.utc).isoformat()
-    # Update timeline
+    txn_id = None
+    mode_label = "demo"
+
+    if cfg and cfg.get("mode") in ("sandbox", "live"):
+        try:
+            cli = PayPalClient(cfg["mode"], cfg["client_id"], cfg["client_secret"])
+            result = cli.capture_order(order_id)
+        except Exception as e:
+            logger.error(f"PayPal capture failed: {e}")
+            raise HTTPException(502, f"PayPal capture error: {e}")
+        if result.get("status") != "COMPLETED":
+            raise HTTPException(400, f"PayPal order not completed: {result.get('status')}")
+        try:
+            pu = (result.get("purchase_units") or [{}])[0]
+            cap = (pu.get("payments", {}).get("captures") or [{}])[0]
+            txn_id = cap.get("id")
+        except Exception:
+            txn_id = order_id
+        mode_label = cfg["mode"]
+    else:
+        txn_id = f"PP-DEMO-{uuid.uuid4().hex[:10].upper()}"
+
     timeline = appdoc.get("timeline", _initial_timeline())
     for t in timeline:
         if t["key"] == "payment_received":
@@ -280,11 +368,18 @@ async def payment_capture(application_id: str = Form(...), order_id: str = Form(
             "payment.status": "paid",
             "payment.transaction_id": txn_id,
             "payment.paid_at": now,
+            "payment.mode": mode_label,
             "timeline": timeline,
             "updated_at": now,
         }},
     )
-    return {"status": "paid", "transaction_id": txn_id}
+
+    appdoc = await db.applications.find_one({"id": application_id}, {"_id": 0})
+    prop = await db.properties.find_one({"id": appdoc["property_id"]}, {"_id": 0})
+    origin = request.headers.get("origin") or os.environ.get("FRONTEND_URL", "")
+    await _send_app_emails(appdoc, prop, "payment_received", origin)
+
+    return {"status": "paid", "transaction_id": txn_id, "mode": mode_label}
 
 
 # ------------------ Tracking ------------------
@@ -494,7 +589,7 @@ async def admin_update_screening(app_id: str, payload: ScreeningUpdate, admin=De
 
 
 @api.post("/admin/applications/{app_id}/decision")
-async def admin_set_decision(app_id: str, payload: DecisionUpdate, admin=Depends(require_admin)):
+async def admin_set_decision(app_id: str, payload: DecisionUpdate, request: Request, admin=Depends(require_admin)):
     now = datetime.now(timezone.utc).isoformat()
     a = await db.applications.find_one({"id": app_id}, {"_id": 0})
     if not a:
@@ -515,6 +610,21 @@ async def admin_set_decision(app_id: str, payload: DecisionUpdate, admin=Depends
             "updated_at": now,
         }},
     )
+
+    # Email notification on decision
+    a2 = await db.applications.find_one({"id": app_id}, {"_id": 0})
+    prop = await db.properties.find_one({"id": a2["property_id"]}, {"_id": 0})
+    origin = request.headers.get("origin") or os.environ.get("FRONTEND_URL", "")
+    tpl_map = {
+        "approved": "decision_approved",
+        "pre_approved": "decision_approved",
+        "not_qualified": "decision_not_qualified",
+        "more_info_needed": "decision_more_info",
+    }
+    tpl = tpl_map.get(payload.decision)
+    if tpl:
+        await _send_app_emails(a2, prop, tpl, origin)
+
     return {"status": "ok", "decision": payload.decision}
 
 
@@ -624,22 +734,79 @@ async def admin_list_audit_logs(admin=Depends(require_admin)):
     return items
 
 
-# ------------------ Admin: Settings (SMTP placeholder) ------------------
+# ------------------ Admin: Settings (SMTP + PayPal) ------------------
+def _mask_secret(v):
+    if not v:
+        return ""
+    if len(v) <= 4:
+        return "•••"
+    return "•" * (len(v) - 4) + v[-4:]
+
+
+def _redact_settings(s: dict) -> dict:
+    """Mask secrets before returning to frontend (so admin sees they exist but cannot read)."""
+    out = {**s}
+    smtp = dict(out.get("smtp") or {})
+    if smtp.get("password"):
+        smtp["password_set"] = True
+        smtp["password"] = ""
+    out["smtp"] = smtp
+    pp = dict(out.get("paypal") or {})
+    if pp.get("client_secret"):
+        pp["client_secret_set"] = True
+        pp["client_secret"] = ""
+    out["paypal"] = pp
+    return out
+
+
 @api.get("/admin/settings")
 async def admin_get_settings(admin=Depends(require_admin)):
     s = await db.settings.find_one({"id": "global"}, {"_id": 0})
     if not s:
-        s = {"id": "global", "smtp": {}, "ssn_allow_download": False, "ssn_retention_days": 30}
-    return s
+        s = {"id": "global", "smtp": {}, "paypal": {"mode": "demo"}, "ssn_allow_download": False, "ssn_retention_days": 30}
+    return _redact_settings(s)
 
 
 @api.put("/admin/settings")
 async def admin_update_settings(settings: dict, admin=Depends(require_super_admin)):
+    # Preserve existing secrets if frontend sends blank (mask placeholder)
+    existing = await db.settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    smtp_in = settings.get("smtp") or {}
+    if "password" in smtp_in and not smtp_in["password"]:
+        smtp_in["password"] = (existing.get("smtp") or {}).get("password", "")
+    settings["smtp"] = smtp_in
+    pp_in = settings.get("paypal") or {}
+    if "client_secret" in pp_in and not pp_in["client_secret"]:
+        pp_in["client_secret"] = (existing.get("paypal") or {}).get("client_secret", "")
+    settings["paypal"] = pp_in
     settings["id"] = "global"
     settings["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.settings.update_one({"id": "global"}, {"$set": settings}, upsert=True)
     s = await db.settings.find_one({"id": "global"}, {"_id": 0})
-    return s
+    return _redact_settings(s)
+
+
+@api.post("/admin/settings/smtp/test")
+async def admin_smtp_test(to_email: str = Form(...), admin=Depends(require_admin)):
+    ok, err = await send_smtp_test(db, to_email)
+    if not ok:
+        raise HTTPException(400, err or "Failed to send test email")
+    return {"status": "ok", "to": to_email}
+
+
+@api.post("/admin/settings/paypal/test")
+async def admin_paypal_test(admin=Depends(require_admin)):
+    cfg = await get_paypal_config(db)
+    if not cfg:
+        raise HTTPException(400, "PayPal not configured")
+    if cfg.get("mode") == "demo":
+        return {"status": "ok", "mode": "demo", "note": "Demo mode — no live PayPal call"}
+    try:
+        cli = PayPalClient(cfg["mode"], cfg["client_id"], cfg["client_secret"])
+        result = cli.test_connection()
+        return {"status": "ok", **result}
+    except Exception as e:
+        raise HTTPException(400, f"PayPal test failed: {e}")
 
 
 # ------------------ Mount router ------------------
