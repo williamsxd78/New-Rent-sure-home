@@ -1,10 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { api, formatMoney, SCREENING_LABELS, DECISION_LABELS, STATUS_BADGE } from "@/lib/api";
-import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X } from "lucide-react";
+import { api, formatMoney, BACKEND_URL, SCREENING_LABELS, DECISION_LABELS, STATUS_BADGE } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X, Lock, Download, ImageIcon } from "lucide-react";
 
 const SCREENING_KEYS = ["identity_verification", "income_verification", "credit_report", "background_check", "criminal_record", "rental_history", "final_review"];
 
 const STATUSES = ["pending", "in_progress", "completed", "issue_found", "not_required"];
+
+const SSN_REASONS = [
+  "Screening verification",
+  "Identity verification",
+  "Compliance review",
+  "Applicant support",
+];
 
 export default function AdminApplicationsPage() {
   const [items, setItems] = useState([]);
@@ -86,8 +94,47 @@ export default function AdminApplicationsPage() {
 }
 
 function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, markPayment }) {
+  const { user } = useAuth();
   const [tab, setTab] = useState("overview");
   const [decisionDraft, setDecisionDraft] = useState({ decision: app.decision || "", note: app.decision_note || "", applicant_message: app.applicant_message || "" });
+  const [reasonModal, setReasonModal] = useState(null); // { kind: 'ssn' | 'doc', idx?: number }
+  const [reasonDraft, setReasonDraft] = useState({ reason: SSN_REASONS[0], custom: "" });
+  const [viewerError, setViewerError] = useState("");
+
+  const isSuperAdmin = user?.role === "super_admin";
+
+  const openWithToken = async (url) => {
+    setViewerError("");
+    try {
+      const r = await api.get(url, { responseType: "blob" });
+      const blobUrl = URL.createObjectURL(r.data);
+      window.open(blobUrl, "_blank");
+      // Revoke after 60s to free memory
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } catch (e) {
+      setViewerError(e?.response?.data?.detail || "Could not open document");
+    }
+  };
+
+  const viewDocument = async (idx, sensitive) => {
+    if (sensitive) {
+      setReasonModal({ kind: "doc", idx });
+      return;
+    }
+    await openWithToken(`/admin/applications/${app.id}/documents/${idx}/file`);
+  };
+
+  const confirmReason = async () => {
+    const reason = (reasonDraft.custom || reasonDraft.reason || "").trim();
+    if (!reason) return;
+    const m = reasonModal;
+    setReasonModal(null);
+    if (m.kind === "ssn") {
+      await openWithToken(`/admin/applications/${app.id}/ssn-doc/file?reason=${encodeURIComponent(reason)}`);
+    } else if (m.kind === "doc") {
+      await openWithToken(`/admin/applications/${app.id}/documents/${m.idx}/file?reason=${encodeURIComponent(reason)}`);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-[#0A192F]/60 flex items-center justify-center p-4" data-testid="app-detail-modal">
@@ -117,9 +164,25 @@ function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, ma
               <DataBlock title="Occupants & Pets" data={app.occupants} />
               <DataBlock title="Consent" data={app.consent} />
               <div className="sm:col-span-2 rs-card p-5">
-                <div className="font-display font-semibold text-[#0A192F]">SSN</div>
+                <div className="font-display font-semibold text-[#0A192F] flex items-center gap-2"><Lock className="w-4 h-4 text-[#C5A880]" /> SSN</div>
                 <div className="text-sm text-slate-600 mt-2">Last 4: <span className="font-mono">***-**-{app.ssn_last4 || "----"}</span></div>
-                {app.ssn_full_doc_path && <div className="text-sm text-slate-600 mt-1">Full SSN Document: <span className="font-mono text-slate-400">[REDACTED — Super Admin only]</span></div>}
+                {app.ssn_full_doc_path && (
+                  <div className="mt-3 flex items-center gap-3 flex-wrap">
+                    <span className="text-sm text-slate-600">Full SSN Document:</span>
+                    {isSuperAdmin ? (
+                      <button
+                        onClick={() => { setReasonDraft({ reason: SSN_REASONS[0], custom: "" }); setReasonModal({ kind: "ssn" }); }}
+                        className="rs-btn-gold !py-1.5 !px-3 text-xs"
+                        data-testid="reveal-ssn-btn"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Reveal (audit-logged)
+                      </button>
+                    ) : (
+                      <span className="font-mono text-xs text-slate-400">[REDACTED — Super Admin only]</span>
+                    )}
+                  </div>
+                )}
+                {viewerError && <div className="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{viewerError}</div>}
               </div>
             </div>
           )}
@@ -145,16 +208,31 @@ function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, ma
 
           {tab === "documents" && (
             <div className="space-y-3">
-              {(app.documents || []).length === 0 ? <div className="text-slate-400 text-sm">No documents uploaded.</div> : app.documents.map((d, i) => (
-                <div key={i} className="rs-card p-5 flex items-center gap-4">
-                  <FileText className="w-8 h-8 text-[#C5A880]" />
-                  <div className="flex-1">
-                    <div className="font-medium text-[#0A192F]">{d.type}</div>
-                    <div className="text-xs text-slate-500">{d.filename} · {d.size ? `${Math.round(d.size / 1024)} KB` : ""}</div>
+              {(app.documents || []).length === 0 ? <div className="text-slate-400 text-sm">No documents uploaded.</div> : app.documents.map((d, i) => {
+                const isImage = (d.content_type || "").startsWith("image/") || /\.(jpe?g|png)$/i.test(d.filename || "");
+                const Icon = isImage ? ImageIcon : FileText;
+                return (
+                  <div key={i} className="rs-card p-5 flex items-center gap-4" data-testid={`doc-row-${i}`}>
+                    <Icon className="w-8 h-8 text-[#C5A880]" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
+                        <span>{d.type}</span>
+                        {d.is_sensitive && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Sensitive</span>}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">{d.filename} · {d.size ? `${Math.round(d.size / 1024)} KB` : ""} · {new Date(d.uploaded_at).toLocaleString()}</div>
+                    </div>
+                    <button
+                      onClick={() => viewDocument(i, d.is_sensitive)}
+                      className="rs-btn-outline !py-1.5 !px-3 text-xs"
+                      data-testid={`view-doc-${i}`}
+                    >
+                      <Eye className="w-3.5 h-3.5" /> View
+                    </button>
+                    <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700">{d.status}</span>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700">{d.status}</span>
-                </div>
-              ))}
+                );
+              })}
+              {viewerError && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{viewerError}</div>}
             </div>
           )}
 
@@ -212,6 +290,32 @@ function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, ma
           )}
         </div>
       </div>
+
+      {reasonModal && (
+        <div className="fixed inset-0 z-[70] bg-[#0A192F]/70 flex items-center justify-center p-4" data-testid="reason-modal">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <Lock className="w-5 h-5 text-[#C5A880]" />
+              <h3 className="font-display text-lg font-semibold text-[#0A192F]">Reason for access</h3>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed mb-4">
+              This document contains highly sensitive personal information. Unauthorized access, download, sharing, or storage is prohibited. Your access will be logged.
+            </p>
+            <label className="rs-label">Select a reason</label>
+            <select className="rs-input" value={reasonDraft.reason} onChange={(e) => setReasonDraft({ ...reasonDraft, reason: e.target.value })} data-testid="reason-select">
+              {SSN_REASONS.map((r) => <option key={r}>{r}</option>)}
+              <option value="__custom">Other (specify)…</option>
+            </select>
+            {reasonDraft.reason === "__custom" && (
+              <input className="rs-input mt-3" placeholder="Type a reason" value={reasonDraft.custom} onChange={(e) => setReasonDraft({ ...reasonDraft, custom: e.target.value })} data-testid="reason-custom" />
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setReasonModal(null)} className="rs-btn-outline">Cancel</button>
+              <button onClick={confirmReason} className="rs-btn-primary" data-testid="reason-confirm">View Document</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

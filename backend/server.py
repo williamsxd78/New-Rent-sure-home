@@ -263,8 +263,10 @@ async def upload_doc(app_id: str, doc_type: str = Form(...), file: UploadFile = 
     ext = (file.filename.rsplit(".", 1)[-1] if "." in file.filename else "bin").lower()
     if ext not in {"pdf", "jpg", "jpeg", "png"}:
         raise HTTPException(400, "Only PDF, JPG, PNG accepted")
-    is_ssn = doc_type.lower().startswith("ssn")
-    category = "ssn-secure" if is_ssn else "documents"
+    dt_lower = doc_type.lower().strip()
+    # Only the explicit full SSN document is super-admin-only. SSN selfie (identity verification) is a regular doc.
+    is_ssn_full = dt_lower == "ssn document"
+    category = "ssn-secure" if is_ssn_full else "documents"
     path = build_path(category, app_id, ext)
     data = await file.read()
     if len(data) > 10 * 1024 * 1024:
@@ -282,14 +284,15 @@ async def upload_doc(app_id: str, doc_type: str = Form(...), file: UploadFile = 
         "type": doc_type,
         "filename": file.filename,
         "storage_path": storage_path,
+        "content_type": file.content_type or "application/octet-stream",
         "status": "uploaded",
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "size": len(data),
-        "is_sensitive": is_ssn,
+        "is_sensitive": is_ssn_full,
     }
-    if is_ssn:
+    if is_ssn_full:
         await db.applications.update_one(
-            {"id": app_id}, {"$set": {"ssn_full_doc_path": storage_path, "updated_at": datetime.now(timezone.utc).isoformat()}}
+            {"id": app_id}, {"$set": {"ssn_full_doc_path": storage_path, "ssn_full_content_type": doc_entry["content_type"], "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
     else:
         await db.applications.update_one(
@@ -773,6 +776,88 @@ async def admin_view_full_ssn(
         "ssn_last4": a.get("ssn_last4"),
         "ssn_full_doc_path": a.get("ssn_full_doc_path"),
     }
+
+
+@api.get("/admin/applications/{app_id}/documents/{idx}/file")
+async def admin_view_document_file(
+    app_id: str,
+    idx: int,
+    reason: Optional[str] = Query(None),
+    admin=Depends(require_admin),
+):
+    """Stream a regular uploaded document. Sensitive docs require super_admin + reason."""
+    a = await db.applications.find_one({"id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Application not found")
+    docs = a.get("documents") or []
+    if idx < 0 or idx >= len(docs):
+        raise HTTPException(404, "Document not found")
+    doc = docs[idx]
+    sensitive = bool(doc.get("is_sensitive"))
+    if sensitive:
+        if admin.get("role") != "super_admin":
+            raise HTTPException(403, "Super admin access required")
+        if not reason:
+            raise HTTPException(400, "Reason required for sensitive document access")
+        await db.audit_logs.insert_one({
+            "id": str(uuid.uuid4()),
+            "admin_id": admin["id"],
+            "admin_email": admin["email"],
+            "admin_role": admin["role"],
+            "application_id": app_id,
+            "action": f"view_document:{doc.get('type','unknown')}",
+            "reason": reason,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    path = doc.get("storage_path")
+    if not path or path.startswith("local-fallback/"):
+        raise HTTPException(404, "File not in storage")
+    try:
+        data, ct = await asyncio.to_thread(get_object, path)
+    except Exception as e:
+        raise HTTPException(500, f"Storage fetch failed: {e}")
+    return Response(
+        content=data,
+        media_type=doc.get("content_type") or ct,
+        headers={"Content-Disposition": f'inline; filename="{doc.get("filename","file")}"'},
+    )
+
+
+@api.get("/admin/applications/{app_id}/ssn-doc/file")
+async def admin_view_ssn_doc_file(
+    app_id: str,
+    reason: str = Query(..., description="Reason for access"),
+    admin=Depends(require_super_admin),
+):
+    """Stream the encrypted full-SSN document. Super admin only. Always audited."""
+    a = await db.applications.find_one({"id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Application not found")
+    path = a.get("ssn_full_doc_path")
+    if not path:
+        raise HTTPException(404, "No SSN document on file")
+    # Audit log
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "admin_id": admin["id"],
+        "admin_email": admin["email"],
+        "admin_role": admin["role"],
+        "application_id": app_id,
+        "action": "view_ssn_document",
+        "reason": reason,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    if path.startswith("local-fallback/"):
+        raise HTTPException(404, "File not in storage")
+    try:
+        data, ct = await asyncio.to_thread(get_object, path)
+    except Exception as e:
+        raise HTTPException(500, f"Storage fetch failed: {e}")
+    return Response(
+        content=data,
+        media_type=a.get("ssn_full_content_type") or ct,
+        headers={"Content-Disposition": 'inline; filename="ssn-document"'},
+    )
 
 
 # ------------------ Admin: Audit Logs ------------------
