@@ -434,6 +434,56 @@ async def payment_capture(request: Request, application_id: str = Form(...), ord
     return {"status": "paid", "transaction_id": txn_id, "mode": mode_label}
 
 
+# ------------------ Bank Transfer (alternate payment) ------------------
+@api.get("/payments/bank-info")
+async def public_bank_info():
+    """Public — returns bank account details for applicant wire/transfer instructions."""
+    s = await db.settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    bt = s.get("bank_transfer") or {}
+    if not bt.get("enabled"):
+        return {"enabled": False}
+    return {
+        "enabled": True,
+        "account_name": bt.get("account_name", ""),
+        "account_number": bt.get("account_number", ""),
+        "routing_number": bt.get("routing_number", ""),
+        "bank_address": bt.get("bank_address", ""),
+        "bank_name": bt.get("bank_name", ""),
+        "instructions": bt.get("instructions", ""),
+        "contact_email": bt.get("contact_email", ""),
+    }
+
+
+@api.post("/payments/bank-transfer")
+async def submit_bank_transfer(
+    application_id: str = Form(...),
+    transaction_id: str = Form(...),
+    request: Request = None,
+):
+    """Applicant submits the transaction reference after wiring funds. Admin verifies."""
+    a = await db.applications.find_one({"id": application_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Application not found")
+    txn = (transaction_id or "").strip()
+    if not txn:
+        raise HTTPException(400, "Transaction ID is required")
+
+    now = datetime.now(timezone.utc).isoformat()
+    # Don't mark as paid — admin must verify the actual bank transfer
+    await db.applications.update_one(
+        {"id": application_id},
+        {"$set": {
+            "payment.status": "pending_verification",
+            "payment.method": "bank_transfer",
+            "payment.transaction_id": txn,
+            "payment.submitted_at": now,
+            "payment.mode": "bank_transfer",
+            "updated_at": now,
+        }},
+    )
+    return {"status": "pending_verification", "transaction_id": txn}
+
+
 # ------------------ Tracking ------------------
 @api.post("/track")
 async def track(payload: TrackIn):

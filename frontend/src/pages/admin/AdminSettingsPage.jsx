@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import {
-  Mail, Lock, Save, CreditCard, Send, CheckCircle2, AlertCircle, ExternalLink, Info, ShieldCheck,
+  Mail, Lock, Save, CreditCard, Send, CheckCircle2, AlertCircle, ExternalLink, Info, ShieldCheck, Landmark,
 } from "lucide-react";
 
 export default function AdminSettingsPage() {
@@ -19,6 +19,11 @@ export default function AdminSettingsPage() {
     setS({
       smtp: { host: "", port: 587, username: "", password: "", from_email: "", use_tls: true, enabled: false, ...(r.data.smtp || {}) },
       paypal: { mode: "demo", client_id: "", client_secret: "", ...(r.data.paypal || {}) },
+      bank_transfer: {
+        enabled: false, bank_name: "", account_name: "", account_number: "", routing_number: "",
+        bank_address: "", instructions: "", contact_email: "",
+        ...(r.data.bank_transfer || {}),
+      },
       ssn_allow_download: r.data.ssn_allow_download ?? false,
       ssn_retention_days: r.data.ssn_retention_days ?? 30,
     });
@@ -39,6 +44,7 @@ export default function AdminSettingsPage() {
 
   const updateSmtp = (k, v) => setS({ ...s, smtp: { ...s.smtp, [k]: v } });
   const updatePp = (k, v) => setS({ ...s, paypal: { ...s.paypal, [k]: v } });
+  const updateBt = (k, v) => setS({ ...s, bank_transfer: { ...s.bank_transfer, [k]: v } });
 
   const testSmtp = async () => {
     setTestResult({ ...testResult, smtp: { status: "running" } });
@@ -71,6 +77,7 @@ export default function AdminSettingsPage() {
       <div className="flex gap-1 border-b border-slate-200 mb-6">
         {[
           { k: "paypal", label: "PayPal", icon: CreditCard },
+          { k: "bank", label: "Bank Transfer", icon: Landmark },
           { k: "smtp", label: "SMTP Email", icon: Mail },
           { k: "security", label: "Security & SSN", icon: ShieldCheck },
         ].map((t) => (
@@ -129,6 +136,42 @@ export default function AdminSettingsPage() {
                 {testResult.paypal.msg || "Testing…"}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {tab === "bank" && (
+        <div className="rs-card p-7" data-testid="bank-section">
+          <div className="flex items-center gap-2 mb-1"><Landmark className="w-5 h-5 text-[#C5A880]" /><h2 className="font-display font-semibold text-[#0A192F] text-lg">Bank Transfer (Wire / ACH)</h2></div>
+          <p className="text-sm text-slate-500 mb-5">
+            Offer applicants a second payment option. When enabled, applicants will see your bank details on the payment step and can submit a transaction reference after wiring funds. You verify the transfer and mark it paid in Applications.
+          </p>
+
+          <label className="flex items-center gap-2 cursor-pointer mb-4">
+            <input type="checkbox" checked={!!s.bank_transfer.enabled} onChange={(e) => updateBt("enabled", e.target.checked)} data-testid="bank-enabled" />
+            <span className="text-sm font-medium text-[#0A192F]">Enable Bank Transfer as a payment option</span>
+          </label>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div><label className="rs-label">Bank Name</label><input className="rs-input" value={s.bank_transfer.bank_name} onChange={(e) => updateBt("bank_name", e.target.value)} placeholder="Chase Bank" data-testid="bank-bank-name" /></div>
+            <div><label className="rs-label">Account Holder Name</label><input className="rs-input" value={s.bank_transfer.account_name} onChange={(e) => updateBt("account_name", e.target.value)} placeholder="RentSure Homes LLC" data-testid="bank-account-name" /></div>
+            <div><label className="rs-label">Account Number</label><input className="rs-input font-mono" value={s.bank_transfer.account_number} onChange={(e) => updateBt("account_number", e.target.value)} placeholder="000123456789" data-testid="bank-account-number" /></div>
+            <div><label className="rs-label">Routing Number (ABA)</label><input className="rs-input font-mono" value={s.bank_transfer.routing_number} onChange={(e) => updateBt("routing_number", e.target.value)} placeholder="021000021" data-testid="bank-routing" /></div>
+            <div className="sm:col-span-2"><label className="rs-label">Bank Address</label><input className="rs-input" value={s.bank_transfer.bank_address} onChange={(e) => updateBt("bank_address", e.target.value)} placeholder="270 Park Ave, New York, NY 10017" data-testid="bank-address" /></div>
+            <div className="sm:col-span-2">
+              <label className="rs-label">Contact Email for Transaction Submissions</label>
+              <input type="email" className="rs-input" value={s.bank_transfer.contact_email} onChange={(e) => updateBt("contact_email", e.target.value)} placeholder="payments@rentsurehomes.com" data-testid="bank-contact-email" />
+              <p className="text-xs text-slate-500 mt-1">Shown to applicants in the "Please submit transaction id to…" instruction.</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="rs-label">Additional Instructions (optional)</label>
+              <textarea rows={3} className="rs-input" value={s.bank_transfer.instructions} onChange={(e) => updateBt("instructions", e.target.value)} placeholder="Please include your Application ID in the wire memo / reference." data-testid="bank-instructions" />
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <button onClick={save} disabled={saving} className="rs-btn-primary" data-testid="save-bank"><Save className="w-4 h-4" /> Save & Apply</button>
+            <span className="text-xs text-slate-500">Changes go live immediately on the applicant payment page.</span>
           </div>
         </div>
       )}

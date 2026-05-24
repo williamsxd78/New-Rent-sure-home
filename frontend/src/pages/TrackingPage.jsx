@@ -128,7 +128,7 @@ function TrackingResult({ data }) {
           <div className="text-sm text-blue-900 leading-relaxed">
             <div className="font-semibold text-blue-900">Your application is being reviewed</div>
             <div className="mt-1">
-              Most rental screenings are completed within <strong>24–48 hours</strong> of payment. We'll email you the moment your status changes, and you can refresh this page anytime to see the latest updates. Thanks for your patience.
+              Most application verifications are completed within <strong>24–48 hours</strong> of payment. We'll email you the moment your status changes. Thanks for your patience.
             </div>
           </div>
         </div>

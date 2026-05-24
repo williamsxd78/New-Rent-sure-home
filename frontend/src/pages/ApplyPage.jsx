@@ -5,7 +5,7 @@ import SelfieCapture from "@/components/site/SelfieCapture";
 import { api, formatMoney } from "@/lib/api";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
-  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera,
+  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera, Landmark, Clipboard, Building2,
 } from "lucide-react";
 
 const STEPS = [
@@ -28,10 +28,23 @@ const BANK_STATEMENT_REQUIRED_STATUSES = new Set([
   "Business owner",
 ]);
 
-const requiredDocTypes = (employment) => {
-  const list = ["Driver License", "Paystub", "W-2 / Tax Document", "SSN Verification", "Live Selfie Verification"];
-  if (BANK_STATEMENT_REQUIRED_STATUSES.has(employment?.status)) list.push("Bank Statement");
-  return list;
+// Doc types that allow multiple file uploads
+const MULTI_DOC_TYPES = new Set(["Paystub"]);
+
+const PAYSTUB_REQUIRED_COUNT = 2;
+
+const getMissingDocs = (uploaded, employment) => {
+  const counts = {};
+  uploaded.forEach((u) => { counts[u.type] = (counts[u.type] || 0) + 1; });
+  const missing = [];
+  if (!counts["Driver License"]) missing.push("Driver License");
+  const psCount = counts["Paystub"] || 0;
+  if (psCount < PAYSTUB_REQUIRED_COUNT) missing.push(`Paystub (${psCount} of ${PAYSTUB_REQUIRED_COUNT})`);
+  if (!counts["W-2 / Tax Document"]) missing.push("W-2 / Tax Document");
+  if (!counts["SSN Verification"]) missing.push("SSN Verification");
+  if (!counts["Live Selfie Verification"]) missing.push("Live Selfie Verification");
+  if (BANK_STATEMENT_REQUIRED_STATUSES.has(employment?.status) && !counts["Bank Statement"]) missing.push("Bank Statement");
+  return missing;
 };
 
 const blank = {
@@ -56,6 +69,10 @@ export default function ApplyPage() {
   });
   const [appResult, setAppResult] = useState(null); // {id, application_number, application_fee}
   const [paymentDone, setPaymentDone] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState(""); // "paypal" or "bank_transfer"
+  const [bankInfo, setBankInfo] = useState(null);
+  const [bankTxnId, setBankTxnId] = useState("");
+  const [bankSubmitting, setBankSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({}); // { docType: 0-100 }
   const [uploaded, setUploaded] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -64,6 +81,8 @@ export default function ApplyPage() {
   const [error, setError] = useState("");
 
   useEffect(() => { api.get(`/properties/${propertyId}`).then((r) => setProperty(r.data)).catch(() => {}); }, [propertyId]);
+
+  useEffect(() => { api.get("/payments/bank-info").then((r) => setBankInfo(r.data)).catch(() => setBankInfo({ enabled: false })); }, []);
 
   useEffect(() => { localStorage.setItem(`rs_apply_${propertyId}`, JSON.stringify(data)); }, [data, propertyId]);
 
@@ -92,9 +111,7 @@ export default function ApplyPage() {
     }
     if (step === 5) {
       // Documents must all be uploaded before continuing
-      const uploadedTypes = new Set(uploaded.map((u) => u.type));
-      const required = requiredDocTypes(data.employment);
-      const missing = required.filter((t) => !uploadedTypes.has(t));
+      const missing = getMissingDocs(uploaded, data.employment);
       if (missing.length > 0) {
         return setError(`Please upload all required documents: ${missing.join(", ")}`) || false;
       }
@@ -170,8 +187,9 @@ export default function ApplyPage() {
           }
         },
       });
-      // Remove any prior upload of the same type, then add new
-      setUploaded((u) => [...u.filter((x) => x.type !== docType), r.data]);
+      // For multi-file types (Paystub), append. For others, replace any prior upload of same type.
+      const isMulti = MULTI_DOC_TYPES.has(docType);
+      setUploaded((u) => isMulti ? [...u, r.data] : [...u.filter((x) => x.type !== docType), r.data]);
       setUploadProgress((p) => ({ ...p, [docType]: 100 }));
       setTimeout(() => setUploadProgress((p) => { const n = { ...p }; delete n[docType]; return n; }), 800);
     } catch (e) {
@@ -198,6 +216,21 @@ export default function ApplyPage() {
       localStorage.setItem(`rs_pp_state_${propertyId}`, JSON.stringify({ app_id: appResult.id, app_number: appResult.application_number, application_fee: appResult.application_fee, step: 8 }));
       window.location.href = r.data.approve_url;
     } catch (e) { setError("Payment failed: " + (e?.response?.data?.detail || "")); }
+  };
+
+  const submitBankTransfer = async () => {
+    if (!appResult || !bankTxnId.trim()) return;
+    setBankSubmitting(true);
+    setError("");
+    try {
+      const fd = new FormData();
+      fd.append("application_id", appResult.id);
+      fd.append("transaction_id", bankTxnId.trim());
+      await api.post("/payments/bank-transfer", fd);
+      setPaymentDone(true);
+    } catch (e) {
+      setError("Submit failed: " + (e?.response?.data?.detail || ""));
+    } finally { setBankSubmitting(false); }
   };
 
   const finalSubmit = () => {
@@ -257,7 +290,7 @@ export default function ApplyPage() {
               {step === 4 && <Step6 d={data} setTop={setTop} update={(f, v) => update("consent", f, v)} />}
               {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} employment={data.employment} openSelfie={() => setSelfieOpen(true)} />}
               {step === 6 && <Step8 data={data} property={property} uploaded={uploaded} onEdit={setStep} />}
-              {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} />}
+              {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod} bankInfo={bankInfo} bankTxnId={bankTxnId} setBankTxnId={setBankTxnId} submitBankTransfer={submitBankTransfer} bankSubmitting={bankSubmitting} />}
               {step === 8 && <Step10 appResult={appResult} property={property} applicantEmail={data.contact?.email} />}
 
               {step < 8 && (
@@ -441,7 +474,7 @@ function Step6({ d, setTop, update }) {
 
 const DOC_TYPES = [
   { key: "Driver License", required: true, hint: "Government-issued photo ID" },
-  { key: "Paystub", required: true, hint: "Upload 2 most recent paystubs (combined into one PDF)" },
+  { key: "Paystub", required: true, multiple: true, minCount: 2, hint: "Select 2 most recent paystubs (you can pick both files at once)" },
   { key: "W-2 / Tax Document", required: true, hint: "Most recent W-2 or tax return" },
   { key: "SSN Verification", required: true, sensitive: true, hint: "Upload your SSN document — encrypted & audit-logged. Super-admin only." },
   { key: "Bank Statement", required: false, hint: "Required for self-employed / freelance / cash-income applicants" },
@@ -456,10 +489,9 @@ function Step7({ onUpload, progress, uploaded, employment, openSelfie }) {
     allDocs[bankIdx] = { ...allDocs[bankIdx], required: true, hint: "Required: 2 most recent bank statements" };
   }
 
-  const uploadedTypes = new Set(uploaded.map((u) => u.type));
-  const hasSelfie = uploadedTypes.has("Live Selfie Verification");
-  const required = requiredDocTypes(employment);
-  const remainingRequired = required.filter((t) => !uploadedTypes.has(t));
+  const uploadedByType = uploaded.reduce((acc, u) => { (acc[u.type] = acc[u.type] || []).push(u); return acc; }, {});
+  const hasSelfie = !!uploadedByType["Live Selfie Verification"];
+  const remainingRequired = getMissingDocs(uploaded, employment);
 
   return (
     <div>
@@ -495,28 +527,45 @@ function Step7({ onUpload, progress, uploaded, employment, openSelfie }) {
 
       <div className="grid sm:grid-cols-2 gap-4">
         {allDocs.map((dt) => {
-          const has = uploaded.find((u) => u.type === dt.key);
+          const files = uploadedByType[dt.key] || [];
+          const has = files.length > 0;
           const pct = progress[dt.key];
           const uploading = pct !== undefined && pct < 100;
           const sensitive = dt.sensitive;
+          const minCount = dt.minCount || 1;
+          const enough = dt.multiple ? files.length >= minCount : has;
           const baseCls = sensitive && !has
             ? "border-amber-300 bg-amber-50 hover:border-amber-400"
-            : has
+            : enough
               ? "border-emerald-300 bg-emerald-50"
-              : "border-slate-200 hover:border-[#0A192F]";
+              : has
+                ? "border-blue-300 bg-blue-50"
+                : "border-slate-200 hover:border-[#0A192F]";
           return (
             <label key={dt.key} className={`block rounded-xl border-2 border-dashed p-5 cursor-pointer transition ${baseCls}`} data-testid={`doc-${dt.key.replace(/\s+/g, "-").toLowerCase()}`}>
               <div className="flex items-center gap-3">
-                {sensitive && !has ? <Lock className="w-5 h-5 text-amber-700" /> : has ? <FileCheck className="w-5 h-5 text-emerald-600" /> : <Upload className="w-5 h-5 text-slate-400" />}
+                {sensitive && !has ? <Lock className="w-5 h-5 text-amber-700" /> : enough ? <FileCheck className="w-5 h-5 text-emerald-600" /> : has ? <Upload className="w-5 h-5 text-blue-600" /> : <Upload className="w-5 h-5 text-slate-400" />}
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-[#0A192F] flex items-center gap-2 flex-wrap">
                     <span>{dt.key}</span>
                     {dt.required && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200">Required</span>}
-                    {has && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Uploaded</span>}
+                    {dt.multiple && (
+                      <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${enough ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-600 border-slate-200"}`}>
+                        {files.length} of {minCount}
+                      </span>
+                    )}
+                    {!dt.multiple && has && <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Uploaded</span>}
                   </div>
-                  <div className="text-xs text-slate-500 truncate">
-                    {has ? has.filename : (dt.hint || "Click to upload")}
+                  <div className="text-xs text-slate-500 mt-0.5">
+                    {has ? (
+                      dt.multiple
+                        ? files.map((f) => f.filename).join(", ")
+                        : files[0].filename
+                    ) : (dt.hint || "Click to upload")}
                   </div>
+                  {dt.multiple && has && !enough && (
+                    <div className="text-xs text-amber-700 mt-1">Click again to add the remaining {minCount - files.length} file{minCount - files.length > 1 ? "s" : ""}</div>
+                  )}
                 </div>
               </div>
               {pct !== undefined && (
@@ -533,7 +582,18 @@ function Step7({ onUpload, progress, uploaded, employment, openSelfie }) {
                   </div>
                 </div>
               )}
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0], dt.key)} disabled={uploading} />
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                multiple={!!dt.multiple}
+                className="hidden"
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  for (const f of files) await onUpload(f, dt.key);
+                  e.target.value = "";
+                }}
+                disabled={uploading}
+              />
             </label>
           );
         })}
@@ -595,34 +655,134 @@ const ReviewBlock = ({ title, data, editStep, onEdit }) => (
   </div>
 );
 
-function Step9({ property, appResult, paymentDone, handlePay }) {
+function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, setPaymentMethod, bankInfo, bankTxnId, setBankTxnId, submitBankTransfer, bankSubmitting }) {
+  const fee = appResult?.application_fee || property?.application_fee || 0;
+  const bankEnabled = bankInfo?.enabled;
+
+  const copyVal = (v) => navigator.clipboard?.writeText(v || "");
+
   return (
     <div>
       <h2 className="font-display text-xl font-semibold text-[#0A192F]">Application Fee Payment</h2>
+
       <div className="mt-5 rs-card p-7">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-[#C5A880] font-semibold">Total Due</div>
-            <div className="font-display text-4xl font-bold text-[#0A192F] mt-1">{formatMoney(appResult?.application_fee || property?.application_fee || 0)}</div>
-            <div className="text-sm text-slate-500 mt-1">Application No.: <span className="font-mono text-[#0A192F]">{appResult?.application_number}</span></div>
-          </div>
-          <div className="text-right">
-            {paymentDone ? (
-              <div className="flex items-center gap-2 text-emerald-700 font-semibold"><CheckCircle2 className="w-5 h-5" /> Payment Received</div>
-            ) : (
-              <button onClick={handlePay} className="rs-btn-gold" data-testid="paypal-pay-btn">
-                <CreditCard className="w-4 h-4" /> Pay with PayPal (Demo)
+        <div className="text-xs uppercase tracking-[0.2em] text-[#C5A880] font-semibold">Total Due</div>
+        <div className="font-display text-4xl font-bold text-[#0A192F] mt-1">{formatMoney(fee)}</div>
+        <div className="text-sm text-slate-500 mt-1">Application No.: <span className="font-mono text-[#0A192F]">{appResult?.application_number}</span></div>
+      </div>
+
+      {paymentDone ? (
+        <div className="mt-5 rs-card p-7 border-emerald-200 bg-emerald-50/50" data-testid="payment-success-card">
+          <div className="flex items-center gap-2 text-emerald-700 font-display font-semibold text-lg"><CheckCircle2 className="w-5 h-5" /> Payment Submitted</div>
+          <p className="text-sm text-slate-600 mt-2">You can now submit your application. {paymentMethod === "bank_transfer" && "We'll verify your bank transfer shortly and update your status."}</p>
+        </div>
+      ) : (
+        <>
+          {/* Method picker */}
+          <div className={`mt-5 grid ${bankEnabled ? "sm:grid-cols-2" : "grid-cols-1"} gap-3`} data-testid="payment-method-picker">
+            <button
+              onClick={() => setPaymentMethod("paypal")}
+              className={`rs-card p-5 text-left transition ${paymentMethod === "paypal" ? "ring-2 ring-[#0A192F]" : "hover:bg-slate-50"}`}
+              data-testid="method-paypal"
+            >
+              <div className="flex items-center gap-2 text-[#0A192F] font-display font-semibold"><CreditCard className="w-5 h-5 text-[#C5A880]" /> PayPal</div>
+              <div className="text-xs text-slate-500 mt-1">Pay securely with PayPal. Instant confirmation.</div>
+            </button>
+            {bankEnabled && (
+              <button
+                onClick={() => setPaymentMethod("bank_transfer")}
+                className={`rs-card p-5 text-left transition ${paymentMethod === "bank_transfer" ? "ring-2 ring-[#0A192F]" : "hover:bg-slate-50"}`}
+                data-testid="method-bank"
+              >
+                <div className="flex items-center gap-2 text-[#0A192F] font-display font-semibold"><Landmark className="w-5 h-5 text-[#C5A880]" /> Bank Transfer</div>
+                <div className="text-xs text-slate-500 mt-1">Wire / ACH. Verified within 24 hours.</div>
               </button>
             )}
           </div>
-        </div>
-      </div>
-      <label className="flex items-start gap-2 mt-4 text-sm text-slate-600">
+
+          {/* PayPal action */}
+          {paymentMethod === "paypal" && (
+            <div className="mt-5 rs-card p-7 flex items-center justify-between flex-wrap gap-4" data-testid="paypal-pane">
+              <div className="text-sm text-slate-600">You'll be redirected to PayPal to complete payment securely.</div>
+              <button onClick={handlePay} className="rs-btn-gold" data-testid="paypal-pay-btn">
+                <CreditCard className="w-4 h-4" /> Pay with PayPal
+              </button>
+            </div>
+          )}
+
+          {/* Bank transfer details */}
+          {paymentMethod === "bank_transfer" && bankInfo && (
+            <div className="mt-5 rs-card p-7" data-testid="bank-pane">
+              <div className="flex items-center gap-2 text-[#0A192F] font-display font-semibold"><Building2 className="w-5 h-5 text-[#C5A880]" /> Bank Transfer Instructions</div>
+              <p className="text-sm text-slate-500 mt-1">Transfer <strong className="text-[#0A192F]">{formatMoney(fee)}</strong> to the account below. Then enter your transaction / confirmation ID to submit your application.</p>
+
+              <div className="mt-5 grid sm:grid-cols-2 gap-3" data-testid="bank-details">
+                {bankInfo.bank_name && <BankRow label="Bank" value={bankInfo.bank_name} onCopy={copyVal} testid="bd-bank-name" />}
+                <BankRow label="Account Holder Name" value={bankInfo.account_name} onCopy={copyVal} testid="bd-account-name" />
+                <BankRow label="Account Number" value={bankInfo.account_number} onCopy={copyVal} mono testid="bd-account-number" />
+                <BankRow label="Routing Number" value={bankInfo.routing_number} onCopy={copyVal} mono testid="bd-routing" />
+                <div className="sm:col-span-2"><BankRow label="Bank Address" value={bankInfo.bank_address} onCopy={copyVal} testid="bd-address" /></div>
+              </div>
+
+              {bankInfo.instructions && (
+                <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900">
+                  <strong className="block mb-1">Additional Instructions</strong>
+                  {bankInfo.instructions}
+                </div>
+              )}
+
+              <div className="mt-5 p-4 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+                <div className="font-semibold flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Please submit your transaction ID</div>
+                <div className="mt-1 text-xs">
+                  After completing the transfer, enter your transaction / confirmation number below
+                  {bankInfo.contact_email && <> or email it to <a href={`mailto:${bankInfo.contact_email}`} className="text-amber-900 underline font-medium">{bankInfo.contact_email}</a></>}
+                  . Include your Application ID <span className="font-mono font-semibold">{appResult?.application_number}</span> as the wire memo.
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <label className="rs-label">Transaction / Confirmation ID</label>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    className="rs-input flex-1 min-w-[200px] font-mono"
+                    value={bankTxnId}
+                    onChange={(e) => setBankTxnId(e.target.value)}
+                    placeholder="e.g. FED20260524ABC1234"
+                    data-testid="bank-txn-id"
+                  />
+                  <button
+                    onClick={submitBankTransfer}
+                    disabled={!bankTxnId.trim() || bankSubmitting}
+                    className="rs-btn-primary disabled:opacity-40"
+                    data-testid="bank-submit-btn"
+                  >
+                    {bankSubmitting ? "Submitting…" : "Submit"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      <label className="flex items-start gap-2 mt-5 text-sm text-slate-600">
         <input type="checkbox" defaultChecked disabled className="mt-1" /> I understand this application/screening fee is used to process my application. Refund eligibility is subject to the refund policy.
       </label>
-      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-        This is a demo PayPal flow. Real PayPal integration can be enabled by an administrator without code changes to this page.
+    </div>
+  );
+}
+
+function BankRow({ label, value, onCopy, mono, testid }) {
+  if (!value) return null;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 flex items-center justify-between gap-2" data-testid={testid}>
+      <div className="min-w-0">
+        <div className="text-xs text-slate-500">{label}</div>
+        <div className={`text-[#0A192F] font-medium truncate ${mono ? "font-mono" : ""}`}>{value}</div>
       </div>
+      <button onClick={() => onCopy(value)} className="text-xs text-slate-500 hover:text-[#0A192F] flex items-center gap-1 flex-shrink-0" title="Copy">
+        <Clipboard className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
