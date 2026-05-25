@@ -9,6 +9,7 @@ import HomePage from "@/pages/HomePage";
 import PropertiesPage from "@/pages/PropertiesPage";
 import PropertyDetailsPage from "@/pages/PropertyDetailsPage";
 import ApplyPage from "@/pages/ApplyPage";
+import ResumeApplicationPage from "@/pages/ResumeApplicationPage";
 import TrackingPage from "@/pages/TrackingPage";
 import HowItWorksPage from "@/pages/HowItWorksPage";
 import AboutPage from "@/pages/AboutPage";
@@ -46,6 +47,7 @@ function App() {
             <Route path="/properties" element={<PropertiesPage />} />
             <Route path="/properties/:id" element={<PropertyDetailsPage />} />
             <Route path="/apply/:propertyId" element={<ApplyPage />} />
+            <Route path="/resume/:token" element={<ResumeApplicationPage />} />
             <Route path="/track" element={<TrackingPage />} />
             <Route path="/payment/return" element={<PaymentReturnPage />} />
             <Route path="/payment/cancel" element={<PaymentCancelPage />} />

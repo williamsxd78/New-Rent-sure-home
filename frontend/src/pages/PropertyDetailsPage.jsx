@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
-import { api, formatMoney, resolvePropertyImage } from "@/lib/api";
+import { api, formatMoney, resolvePropertyImage, BACKEND_URL } from "@/lib/api";
 import {
   MapPin, Bed, Bath, Maximize, Calendar, Car, Zap, PawPrint, FileText,
-  ShieldCheck, BadgeCheck, AlertCircle, CircleDollarSign, Lock,
+  ShieldCheck, BadgeCheck, AlertCircle, CircleDollarSign, Lock, Share2, Check,
 } from "lucide-react";
 
 export default function PropertyDetailsPage() {
@@ -51,8 +51,13 @@ export default function PropertyDetailsPage() {
                   </span>
                 ))}
               </div>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#0A192F]">{p.title}</h1>
-              <div className="text-slate-500 mt-2 flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {p.address}, {p.city}, {p.state} {p.zip_code}</div>
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0">
+                  <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#0A192F]">{p.title}</h1>
+                  <div className="text-slate-500 mt-2 flex items-center gap-1.5"><MapPin className="w-4 h-4" /> {p.address}, {p.city}, {p.state} {p.zip_code}</div>
+                </div>
+                <ShareButton property={p} />
+              </div>
             </div>
 
             {/* Stats */}
@@ -167,3 +172,81 @@ const Row = ({ label, value, icon: Icon }) => (
     </div>
   </div>
 );
+
+
+function ShareButton({ property }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const slug = property.slug || property.id;
+  // Use the backend share endpoint so social scrapers (FB / WhatsApp / Twitter / Slack) see OG tags
+  const shareUrl = `${BACKEND_URL}/api/share/property/${slug}`;
+  const title = `${property.title} — ${property.city}, ${property.state}`;
+  const text = `Check out this rental: ${title}`;
+
+  const handleNative = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, text, url: shareUrl });
+        return;
+      } catch (_) { /* user cancelled */ }
+    }
+    setOpen((v) => !v);
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (_) { /* noop */ }
+  };
+
+  const enc = (s) => encodeURIComponent(s);
+  const channels = [
+    { name: "WhatsApp", color: "#25D366", href: `https://wa.me/?text=${enc(text + " " + shareUrl)}` },
+    { name: "Facebook", color: "#1877F2", href: `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}` },
+    { name: "Twitter / X", color: "#000000", href: `https://twitter.com/intent/tweet?text=${enc(text)}&url=${enc(shareUrl)}` },
+    { name: "LinkedIn", color: "#0A66C2", href: `https://www.linkedin.com/sharing/share-offsite/?url=${enc(shareUrl)}` },
+    { name: "Telegram", color: "#26A5E4", href: `https://t.me/share/url?url=${enc(shareUrl)}&text=${enc(text)}` },
+    { name: "Email", color: "#475569", href: `mailto:?subject=${enc(title)}&body=${enc(text + "\n\n" + shareUrl)}` },
+  ];
+
+  return (
+    <div className="relative" data-testid="share-button">
+      <button onClick={handleNative} className="rs-btn-outline !py-2 !px-3 text-sm whitespace-nowrap" aria-label="Share property" data-testid="share-btn">
+        <Share2 className="w-4 h-4" /> Share
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-2 z-30 w-72 bg-white border border-slate-200 rounded-xl shadow-xl shadow-[#0A192F]/10 p-3 rs-fade-in" data-testid="share-panel">
+          <div className="font-display font-semibold text-sm text-[#0A192F] mb-2">Share this property</div>
+          <button
+            onClick={copy}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-50 hover:bg-slate-100 transition text-sm"
+            data-testid="share-copy-btn"
+          >
+            <span className="truncate text-slate-600 text-xs font-mono">{shareUrl.replace(/^https?:\/\//, "")}</span>
+            <span className={`flex items-center gap-1 text-xs font-semibold ${copied ? "text-emerald-600" : "text-[#0A192F]"}`}>
+              {copied ? <><Check className="w-3.5 h-3.5" /> Copied</> : "Copy"}
+            </span>
+          </button>
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            {channels.map((c) => (
+              <a
+                key={c.name}
+                href={c.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2 py-2 rounded-lg border border-slate-200 text-[11px] text-center hover:bg-slate-50 transition"
+                style={{ borderTopColor: c.color, borderTopWidth: 3 }}
+                data-testid={`share-${c.name.toLowerCase().split(" ")[0]}`}
+              >
+                {c.name}
+              </a>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 mt-3 text-center">Link auto-generates rich preview on social media.</p>
+        </div>
+      )}
+    </div>
+  );
+}

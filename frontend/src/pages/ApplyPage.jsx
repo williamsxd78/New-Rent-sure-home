@@ -8,7 +8,7 @@ import AddressAutocomplete from "@/components/site/AddressAutocomplete";
 import { api, formatMoney, downloadConfirmationPdf } from "@/lib/api";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
-  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera, Landmark, Clipboard, Building2, Download,
+  AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera, Landmark, Clipboard, Building2, Download, Mail, Save, Loader2,
 } from "lucide-react";
 
 const STEPS = [
@@ -365,23 +365,33 @@ export default function ApplyPage() {
               {step === 8 && <Step10 appResult={appResult} property={property} applicantEmail={data.contact?.email} />}
 
               {step < 8 && (
-                <div className="mt-9 pt-6 border-t border-slate-100 flex flex-wrap justify-between gap-3" data-testid="apply-nav">
+                <div className="mt-9 pt-6 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3" data-testid="apply-nav">
                   <button onClick={back} disabled={step === 0} className="rs-btn-outline disabled:opacity-40" data-testid="apply-back">
                     <ChevronLeft className="w-4 h-4" /> Back
                   </button>
-                  {step === 6 ? (
-                    <button onClick={next} disabled={submitting} className="rs-btn-primary" data-testid="apply-continue-to-payment">
-                      {submitting ? "Submitting…" : "Continue to Payment"} <ChevronRight className="w-4 h-4" />
-                    </button>
-                  ) : step === 7 ? (
-                    <button onClick={() => paymentDone && setConfirmOpen(true)} disabled={!paymentDone} className="rs-btn-primary disabled:opacity-40" data-testid="apply-final-submit">
-                      Submit Application <ChevronRight className="w-4 h-4" />
-                    </button>
-                  ) : (
-                    <button onClick={next} className="rs-btn-primary" data-testid="apply-next">
-                      Next <ChevronRight className="w-4 h-4" />
-                    </button>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {step > 0 && step < 7 && (
+                      <SaveAndResumeButton
+                        defaultEmail={data.contact?.email}
+                        propertyId={propertyId}
+                        state={data}
+                        step={step}
+                      />
+                    )}
+                    {step === 6 ? (
+                      <button onClick={next} disabled={submitting} className="rs-btn-primary" data-testid="apply-continue-to-payment">
+                        {submitting ? "Submitting…" : "Continue to Payment"} <ChevronRight className="w-4 h-4" />
+                      </button>
+                    ) : step === 7 ? (
+                      <button onClick={() => paymentDone && setConfirmOpen(true)} disabled={!paymentDone} className="rs-btn-primary disabled:opacity-40" data-testid="apply-final-submit">
+                        Submit Application <ChevronRight className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button onClick={next} className="rs-btn-primary" data-testid="apply-next">
+                        Next <ChevronRight className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -958,6 +968,90 @@ function Step10({ appResult, property, applicantEmail }) {
         </button>
       </div>
       {dlError && <div className="mt-4 text-sm text-red-600" data-testid="success-pdf-error">{dlError}</div>}
+    </div>
+  );
+}
+
+
+function SaveAndResumeButton({ defaultEmail, propertyId, state, step }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState(defaultEmail || "");
+  const [status, setStatus] = useState("idle"); // idle | sending | ok | err
+  const [errMsg, setErrMsg] = useState("");
+
+  const save = async (e) => {
+    e?.preventDefault();
+    if (!email || !email.includes("@")) { setErrMsg("Enter a valid email"); setStatus("err"); return; }
+    setStatus("sending"); setErrMsg("");
+    try {
+      await api.post("/applications/save-draft", {
+        email: email.trim().toLowerCase(),
+        property_id: propertyId,
+        state,
+        step,
+        frontend_url: typeof window !== "undefined" ? window.location.origin : "",
+      });
+      setStatus("ok");
+    } catch (err) {
+      setStatus("err");
+      setErrMsg(err?.response?.data?.detail || "Could not save. Please try again.");
+    }
+  };
+
+  return (
+    <div className="relative" data-testid="save-resume-wrap">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-600 hover:text-[#0A192F] hover:bg-slate-50 rounded-lg transition"
+        data-testid="save-resume-btn"
+      >
+        <Save className="w-3.5 h-3.5" /> Save &amp; finish later
+      </button>
+      {open && (
+        <div className="absolute right-0 bottom-full mb-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl shadow-[#0A192F]/10 p-4 z-30 rs-fade-in" data-testid="save-resume-panel">
+          {status !== "ok" ? (
+            <form onSubmit={save}>
+              <div className="font-display font-semibold text-[#0A192F] mb-1 text-sm">Email me a resume link</div>
+              <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                We'll save your progress and send a one-click link so you can finish on any device. Link expires in 7 days.
+              </p>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <input
+                  type="email"
+                  className="rs-input pl-9 text-sm"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  data-testid="save-resume-email"
+                />
+              </div>
+              {errMsg && <div className="text-xs text-red-600 mt-2" data-testid="save-resume-error">{errMsg}</div>}
+              <div className="flex justify-end gap-2 mt-3">
+                <button type="button" onClick={() => setOpen(false)} className="text-xs text-slate-500 hover:text-[#0A192F] px-2">Cancel</button>
+                <button type="submit" disabled={status === "sending"} className="rs-btn-primary !py-1.5 !px-3 text-xs disabled:opacity-60" data-testid="save-resume-submit">
+                  {status === "sending" ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</> : <><Save className="w-3.5 h-3.5" /> Save &amp; email me</>}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div data-testid="save-resume-success">
+              <div className="flex items-center gap-2 mb-1">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                <div className="font-display font-semibold text-[#0A192F]">Saved &amp; emailed</div>
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Check <strong className="text-[#0A192F]">{email}</strong> for a resume link. You can safely close this tab — your progress is preserved on this device too.
+              </p>
+              <button onClick={() => { setOpen(false); setStatus("idle"); }} className="rs-btn-outline !py-1.5 !px-3 text-xs mt-3 w-full" data-testid="save-resume-close">
+                Got it
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

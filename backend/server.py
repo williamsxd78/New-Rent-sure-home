@@ -9,11 +9,11 @@ import re
 import uuid
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Header, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse, HTMLResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -162,6 +162,107 @@ async def get_property(pid_or_slug: str):
     if not p:
         raise HTTPException(404, "Property not found")
     return p
+
+
+@api.get("/share/property/{pid_or_slug}", response_class=HTMLResponse)
+async def share_property(pid_or_slug: str, request: Request):
+    """Crawler-friendly preview page. Bots (Facebook/WhatsApp/Twitter/Slack/Telegram/LinkedIn)
+    read the OG/Twitter meta tags from the HTML; real browsers are auto-redirected to the
+    React property page via <meta refresh> + JS fallback."""
+    p = await db.properties.find_one(
+        {"$or": [{"id": pid_or_slug}, {"slug": pid_or_slug}]},
+        {"_id": 0},
+    )
+    if not p:
+        raise HTTPException(404, "Property not found")
+
+    site_url = str(request.base_url).rstrip("/")
+    canonical_slug = p.get("slug") or p["id"]
+    target = f"{site_url}/properties/{canonical_slug}"
+
+    # Resolve the first image to a public URL
+    img_ref = (p.get("images") or [None])[0]
+    if img_ref and isinstance(img_ref, str) and img_ref.startswith("storage://"):
+        image_url = f"{site_url}/api/properties/{p['id']}/images/0"
+    else:
+        image_url = img_ref or ""
+
+    import html as _html
+    def esc(v):
+        return _html.escape(str(v or ""), quote=True)
+
+    rent = p.get("rent")
+    bedrooms = p.get("bedrooms") or 0
+    bathrooms = p.get("bathrooms") or 0
+    sqft = p.get("square_feet") or 0
+    avail = p.get("availability_date") or "now"
+    rent_str = f"${int(rent):,}/mo" if rent else ""
+
+    title = f"{p['title']} — {p['city']}, {p['state']} · {rent_str}".strip(" ·")
+    bd_label = f"{bedrooms} bd" if bedrooms else "Studio"
+    desc = f"{bd_label} · {bathrooms} ba · {sqft} ft² · Available {avail} — Verified rental on RentSure Homes."
+
+    page = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\">
+<title>{esc(title)}</title>
+<meta name=\"description\" content=\"{esc(desc)}\">
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<link rel=\"canonical\" href=\"{esc(target)}\">
+
+<!-- OpenGraph (Facebook / WhatsApp / LinkedIn / Slack / Telegram) -->
+<meta property=\"og:type\" content=\"website\">
+<meta property=\"og:site_name\" content=\"RentSure Homes\">
+<meta property=\"og:title\" content=\"{esc(title)}\">
+<meta property=\"og:description\" content=\"{esc(desc)}\">
+<meta property=\"og:url\" content=\"{esc(target)}\">
+<meta property=\"og:image\" content=\"{esc(image_url)}\">
+<meta property=\"og:image:alt\" content=\"{esc(p['title'])}\">
+<meta property=\"og:locale\" content=\"en_US\">
+
+<!-- Product-specific OG (helps WhatsApp / iMessage show price) -->
+<meta property=\"product:price:amount\" content=\"{esc(rent or '')}\">
+<meta property=\"product:price:currency\" content=\"USD\">
+
+<!-- Twitter Card -->
+<meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:site\" content=\"@rentsurehomes\">
+<meta name=\"twitter:title\" content=\"{esc(title)}\">
+<meta name=\"twitter:description\" content=\"{esc(desc)}\">
+<meta name=\"twitter:image\" content=\"{esc(image_url)}\">
+<meta name=\"twitter:image:alt\" content=\"{esc(p['title'])}\">
+
+<!-- Schema.org structured data -->
+<script type=\"application/ld+json\">
+{{
+  \"@context\": \"https://schema.org\",
+  \"@type\": \"Product\",
+  \"name\": \"{esc(p['title'])}\",
+  \"description\": \"{esc(desc)}\",
+  \"image\": \"{esc(image_url)}\",
+  \"url\": \"{esc(target)}\",
+  \"offers\": {{
+    \"@type\": \"Offer\",
+    \"price\": \"{esc(rent or '')}\",
+    \"priceCurrency\": \"USD\",
+    \"availability\": \"https://schema.org/InStock\",
+    \"url\": \"{esc(target)}\"
+  }}
+}}
+</script>
+
+<!-- Real-browser redirect (bots stay on this page and read the metas above) -->
+<meta http-equiv=\"refresh\" content=\"0; url={esc(target)}\">
+<style>body{{font-family:'Helvetica Neue',Arial,sans-serif;color:#0A192F;background:#F1F5F9;padding:60px;text-align:center;}}a{{color:#C5A880;}}</style>
+</head>
+<body>
+<script>window.location.replace({target!r});</script>
+<h1>{esc(p['title'])}</h1>
+<p>Redirecting to <a href=\"{esc(target)}\">{esc(target)}</a>…</p>
+</body>
+</html>"""
+    return HTMLResponse(content=page)
 
 
 @api.get("/reviews")
@@ -568,6 +669,119 @@ async def submit_contact_message(payload: dict, request: Request):
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     return {"id": mid, "status": "received"}
+
+
+# ------------------ Saved-Draft (Resume via Magic Link) ------------------
+STEP_LABELS = [
+    "Personal Information",
+    "Contact & Address",
+    "Employment & Income",
+    "Occupants & Pets",
+    "Screening Consent",
+    "Document Upload",
+    "Review Application",
+    "Application Fee Payment",
+    "Submit & Tracking",
+]
+
+
+@api.post("/applications/save-draft")
+async def save_application_draft(payload: dict, request: Request):
+    """Save the applicant's in-progress state and email them a one-click resume link."""
+    email = (payload.get("email") or "").strip().lower()
+    property_id = (payload.get("property_id") or "").strip()  # slug or uuid accepted
+    state = payload.get("state") or {}
+    step = int(payload.get("step") or 0)
+    if not email or "@" not in email:
+        raise HTTPException(400, "A valid email is required")
+    if not property_id:
+        raise HTTPException(400, "property_id is required")
+
+    prop = await db.properties.find_one(
+        {"$or": [{"id": property_id}, {"slug": property_id}]}, {"_id": 0},
+    )
+    if not prop:
+        raise HTTPException(404, "Property not found")
+    canonical_slug = prop.get("slug") or prop["id"]
+
+    # Strip any sensitive fields before persisting (SSN is uploaded separately as a doc)
+    if isinstance(state, dict) and isinstance(state.get("personal"), dict):
+        state["personal"].pop("ssn_full", None)
+
+    token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(days=7)
+    await db.application_drafts.insert_one({
+        "id": str(uuid.uuid4()),
+        "token": token,
+        "email": email,
+        "property_id": prop["id"],
+        "property_slug": canonical_slug,
+        "state": state,
+        "step": step,
+        "created_at": now.isoformat(),
+        "expires_at": expires.isoformat(),
+        "consumed_at": None,
+    })
+
+    # Build a frontend URL. The browser knows its own public URL best, so prefer
+    # the explicit `frontend_url` payload field; fall back to Origin / Referer
+    # headers; finally fall back to request.base_url (works in dev / direct curl).
+    public_origin = (payload.get("frontend_url") or "").strip().rstrip("/")
+    if not public_origin:
+        public_origin = (request.headers.get("origin") or "").strip().rstrip("/")
+    if not public_origin:
+        ref = request.headers.get("referer") or ""
+        try:
+            from urllib.parse import urlsplit
+            sp = urlsplit(ref)
+            if sp.scheme and sp.netloc:
+                public_origin = f"{sp.scheme}://{sp.netloc}"
+        except Exception:
+            public_origin = ""
+    if not public_origin:
+        public_origin = str(request.base_url).rstrip("/")
+    resume_url = f"{public_origin}/resume/{token}"
+
+    first_name = ""
+    if isinstance(state, dict):
+        first_name = ((state.get("personal") or {}).get("first_name")) or ""
+    name = first_name or email.split("@")[0]
+    step_label = STEP_LABELS[step] if 0 <= step < len(STEP_LABELS) else ""
+
+    try:
+        await send_templated(db, "application_resume", email, {
+            "name": name,
+            "property_name": prop.get("title", "your property"),
+            "resume_url": resume_url,
+            "step_label": step_label,
+        })
+    except Exception as e:
+        logger.warning(f"Resume email failed: {e}")
+
+    return {"status": "saved", "resume_url": resume_url, "expires_at": expires.isoformat()}
+
+
+@api.get("/applications/resume/{token}")
+async def resume_application_draft(token: str):
+    """Return the saved draft state. Idempotent — token works until it expires."""
+    draft = await db.application_drafts.find_one({"token": token}, {"_id": 0})
+    if not draft:
+        raise HTTPException(404, "Invalid or expired link")
+    try:
+        expires = datetime.fromisoformat(draft["expires_at"])
+    except Exception:
+        raise HTTPException(400, "Draft is corrupted")
+    if datetime.now(timezone.utc) > expires:
+        raise HTTPException(410, "This resume link has expired. Start a new application.")
+    return {
+        "email": draft["email"],
+        "property_id": draft["property_id"],
+        "property_slug": draft.get("property_slug") or draft["property_id"],
+        "state": draft.get("state") or {},
+        "step": draft.get("step") or 0,
+        "expires_at": draft["expires_at"],
+    }
 
 
 # ------------------ Confirmation PDF ------------------
@@ -1363,7 +1577,7 @@ async def admin_update_settings(settings: dict, admin=Depends(require_super_admi
 @api.get("/admin/email-templates/{template}/preview")
 async def admin_preview_email(template: str, admin=Depends(require_admin)):
     """Render an email template with sample data so admins can preview before sending."""
-    if template not in {"application_submitted", "payment_received", "decision_approved", "decision_not_qualified", "decision_more_info"}:
+    if template not in {"application_submitted", "payment_received", "decision_approved", "decision_not_qualified", "decision_more_info", "application_resume"}:
         raise HTTPException(404, "Unknown template")
     rendered = preview_template(template)
     return Response(content=rendered["html"], media_type="text/html")

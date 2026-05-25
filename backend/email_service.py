@@ -36,6 +36,7 @@ SUBJECTS = {
     "decision_approved": "Good news! Your application has been pre-approved",
     "decision_not_qualified": "Update on your rental application — $property_name",
     "decision_more_info": "Additional information needed — $property_name",
+    "application_resume": "Resume your rental application — $property_name",
 }
 
 TEXT = {
@@ -105,6 +106,17 @@ TEXT = {
         "$applicant_message\n\n"
         "Application ID: $application_number\n"
         "Tracking: $tracking_url\n\n"
+        "— RentSure Homes\n"
+    ),
+    "application_resume": (
+        "Hi $name,\n\n"
+        "We've saved your rental application progress for $property_name.\n"
+        "You can pick up exactly where you left off — your already-filled details\n"
+        "are waiting for you.\n\n"
+        "Resume your application:\n"
+        "$resume_url\n\n"
+        "This secure link expires in 7 days. For your security, do not share it.\n\n"
+        "If you didn't request this, you can ignore this email.\n\n"
         "— RentSure Homes\n"
     ),
 }
@@ -407,7 +419,38 @@ def _render_html(template: str, ctx: Dict[str, str], text_body: str) -> str:
         return _render_generic(ctx, text_body, accent_label="Payment Received")
     if template == "decision_more_info":
         return _render_generic(ctx, text_body, accent_label="Action Required")
+    if template == "application_resume":
+        return _render_resume(ctx)
     return _render_generic(ctx, text_body)
+
+
+def _render_resume(ctx: Dict[str, str]) -> str:
+    name = ctx.get("name") or "there"
+    property_name = ctx.get("property_name") or "your property"
+    resume_url = ctx.get("resume_url") or DEFAULT_TRACKING_URL
+    step_label = ctx.get("step_label") or ""
+    body = f"""
+      <tr><td style="padding:36px 40px 18px 40px;" class="px">
+        <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:{GOLD};font-weight:bold;margin-bottom:8px;">Pick up where you left off</div>
+        <h1 class="h1" style="margin:0 0 14px 0;font-family:'Helvetica Neue',Arial,sans-serif;font-size:28px;line-height:34px;color:{NAVY};font-weight:bold;">Hi {name}, we saved your application</h1>
+        <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:24px;color:{SLATE};">
+          Your application for <strong style="color:{NAVY};">{property_name}</strong> is saved and ready to resume. {f'Last completed step: <strong style="color:{NAVY};">{step_label}</strong>.' if step_label else ''}
+        </p>
+      </td></tr>
+      <tr><td style="padding:14px 40px 8px 40px;" class="px">
+        {_cta_button(resume_url, "Resume My Application")}
+        <p style="margin:16px 0 0 0;text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#94A3B8;">This secure link expires in 7 days · Do not share it.</p>
+      </td></tr>
+      <tr><td style="padding:20px 40px 32px 40px;" class="px">
+        <div style="background:#EFF6FF;border-left:4px solid #2563EB;padding:14px 18px;border-radius:6px;">
+          <div style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#1E3A8A;line-height:20px;">
+            <strong>Tip:</strong> Most applicants complete their application in 8&ndash;12 minutes. The link above takes you straight to the step you left off on, with all your previously entered details preserved.
+          </div>
+        </div>
+      </td></tr>
+"""
+    head = Template(_HEAD).safe_substitute(preheader=f"Your saved application for {property_name} is ready to resume.")
+    return head + _HEADER_BAR + body + _FOOTER
 
 
 # ============================================================
@@ -498,7 +541,7 @@ async def send_templated(db, template: str, to_email: str, ctx: Dict[str, str]) 
     safe = {k: str(v or "") for k, v in (ctx or {}).items()}
     for k in ("name", "property_name", "application_number", "amount", "transaction_id",
               "tracking_url", "applicant_message", "submission_date", "payment_status",
-              "decision_date"):
+              "decision_date", "resume_url", "step_label"):
         safe.setdefault(k, "")
     if not safe["tracking_url"]:
         safe["tracking_url"] = DEFAULT_TRACKING_URL
@@ -529,6 +572,8 @@ def preview_template(template: str, ctx: Optional[Dict[str, str]] = None) -> Dic
         "submission_date": "May 24, 2026 · 10:24 AM",
         "payment_status": "Paid",
         "decision_date": "May 26, 2026 · 4:12 PM",
+        "resume_url": "https://rentsurehomes.com/resume/sample-token",
+        "step_label": "Employment & Income",
     }
     for k, v in sample.items():
         safe.setdefault(k, v)
