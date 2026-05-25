@@ -136,10 +136,10 @@ export default function AddressAutocomplete({
   return (
     <div ref={wrapRef} className={`relative ${className}`} data-testid={testid}>
       <div className="relative">
-        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C5A880] pointer-events-none" />
+        <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#C5A880] pointer-events-none z-[1]" />
         <input
           type="text"
-          className="rs-input pl-9 pr-10"
+          className="rs-input pl-10 pr-10"
           value={value || ""}
           onChange={handleInput}
           onFocus={() => suggestions.length > 0 && setOpen(true)}

@@ -30,6 +30,7 @@ from seed import run_seed
 from paypal_client import PayPalClient, get_paypal_config, find_approve_url
 from email_service import send_templated, send_test_email as send_smtp_test, preview_template
 from pdf_service import build_application_confirmation_pdf
+from crypto_pii import encrypt_ssn, decrypt_ssn
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -309,6 +310,20 @@ async def create_application(payload: ApplicationCreate):
     applicant_email = contact.get("email") or personal.get("email") or ""
     applicant_phone = contact.get("phone") or personal.get("phone") or ""
 
+    # Extract and encrypt the full SSN (if applicant typed it). Then scrub the
+    # plaintext from the stored personal dict so it never lives in the DB.
+    ssn_raw = "".join(c for c in (personal.get("ssn_full") or "") if c.isdigit())
+    ssn_encrypted_blob = ""
+    ssn_last4 = payload.ssn_last4 or ""
+    if len(ssn_raw) == 9:
+        try:
+            ssn_encrypted_blob = encrypt_ssn(ssn_raw)
+            ssn_last4 = ssn_raw[-4:]
+        except Exception as e:
+            logger.warning(f"SSN encryption failed: {e}")
+    if "ssn_full" in personal:
+        personal = {**personal, "ssn_full": ""}
+
     doc = {
         "id": app_id,
         "application_number": app_number,
@@ -323,7 +338,8 @@ async def create_application(payload: ApplicationCreate):
         "occupants": payload.occupants or {},
         "consent": payload.consent or {},
         "documents": payload.documents or [],
-        "ssn_last4": payload.ssn_last4,
+        "ssn_last4": ssn_last4 or None,
+        "ssn_encrypted": ssn_encrypted_blob or None,
         "ssn_full_doc_path": payload.ssn_full_doc_path,
         "signature_name": payload.signature_name,
         "signature_date": payload.signature_date,
@@ -377,6 +393,19 @@ async def update_application(app_id: str, payload: ApplicationCreate):
     applicant_email = (contact.get("email") or personal.get("email") or existing.get("applicant_email", "")).lower()
     applicant_phone = contact.get("phone") or personal.get("phone") or existing.get("applicant_phone", "")
 
+    # Encrypt + scrub SSN, same as create_application
+    ssn_raw = "".join(c for c in (personal.get("ssn_full") or "") if c.isdigit())
+    ssn_encrypted_blob = existing.get("ssn_encrypted")
+    ssn_last4 = payload.ssn_last4 or existing.get("ssn_last4")
+    if len(ssn_raw) == 9:
+        try:
+            ssn_encrypted_blob = encrypt_ssn(ssn_raw)
+            ssn_last4 = ssn_raw[-4:]
+        except Exception as e:
+            logger.warning(f"SSN encryption failed: {e}")
+    if "ssn_full" in personal:
+        personal = {**personal, "ssn_full": ""}
+
     update = {
         "personal": personal,
         "contact": contact,
@@ -384,7 +413,8 @@ async def update_application(app_id: str, payload: ApplicationCreate):
         "rental_history": payload.rental_history or {},
         "occupants": payload.occupants or {},
         "consent": payload.consent or {},
-        "ssn_last4": payload.ssn_last4 or existing.get("ssn_last4"),
+        "ssn_last4": ssn_last4,
+        "ssn_encrypted": ssn_encrypted_blob,
         "signature_name": payload.signature_name,
         "signature_date": payload.signature_date,
         "agreed_signature": payload.agreed_signature,

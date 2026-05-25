@@ -1,51 +1,39 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { Eye, EyeOff, Lock } from "lucide-react";
 
 /**
  * Secure 9-digit SSN input.
- * - User types digits only (auto-formatted internally as XXX-XX-XXXX)
- * - Display defaults to masked (***-**-****) for shoulder-surfing protection
- * - Eye toggle reveals the raw formatted value temporarily
+ * - Uses `type="password"` when hidden so the browser handles per-character masking
+ *   natively — fixes the bug where the bullets-as-value approach trapped input
+ *   after the first digit
+ * - Toggle reveals the formatted SSN (`XXX-XX-XXXX`) via `type="text"`
  * - Backend value (via onChange) is always the raw 9-digit string with no dashes
  */
 export default function SecureSSNInput({ value, onChange, required, testid = "f-ssn-full" }) {
   const [show, setShow] = useState(false);
-  const inputRef = useRef(null);
-
   const digits = (value || "").replace(/\D/g, "").slice(0, 9);
-
   const formatted =
     digits.length <= 3 ? digits :
     digits.length <= 5 ? `${digits.slice(0, 3)}-${digits.slice(3)}` :
     `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
 
-  // Mask: show position-by-position to keep caret behavior natural
-  const masked = digits
-    .split("")
-    .map((c, i) => (i === 3 || i === 5 ? "-" + "•" : "•"))
-    .join("")
-    .replace(/^•/, "•"); // no-op, just to keep formatter consistent
-  // Better mask: replace digits with bullets but keep dashes
-  const maskedFormatted = formatted.replace(/\d/g, "•");
-
   const handleChange = (e) => {
-    const next = e.target.value.replace(/\D/g, "").slice(0, 9);
-    onChange(next);
+    // Always strip dashes/spaces; cap at 9 digits
+    onChange(e.target.value.replace(/\D/g, "").slice(0, 9));
   };
 
   return (
     <div className="relative" data-testid={`${testid}-wrap`}>
       <input
-        ref={inputRef}
-        type="text"
+        type={show ? "text" : "password"}
         inputMode="numeric"
         autoComplete="off"
         spellCheck={false}
         className="rs-input pr-20 font-mono tracking-wider"
-        value={show ? formatted : maskedFormatted}
+        value={show ? formatted : digits}
         onChange={handleChange}
-        placeholder="•••-••-••••"
-        maxLength={11}
+        placeholder={show ? "XXX-XX-XXXX" : "Enter 9 digits"}
+        maxLength={show ? 11 : 9}
         required={required}
         data-testid={testid}
         aria-label="Social Security Number"
@@ -58,6 +46,7 @@ export default function SecureSSNInput({ value, onChange, required, testid = "f-
           className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-[#0A192F]"
           aria-label={show ? "Hide SSN" : "Show SSN"}
           data-testid={`${testid}-toggle`}
+          tabIndex={-1}
         >
           {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
         </button>
@@ -73,7 +62,6 @@ export default function SecureSSNInput({ value, onChange, required, testid = "f-
 
 /**
  * Render a stored SSN with only the last 4 digits visible (used in Review / read-only).
- *   stored = "123456789"  →  "•••-••-6789"
  */
 export function maskedSSN(value) {
   const d = (value || "").replace(/\D/g, "");
