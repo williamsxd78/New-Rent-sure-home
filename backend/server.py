@@ -784,6 +784,75 @@ async def resume_application_draft(token: str):
     }
 
 
+@api.post("/applications/resend-resume-link")
+async def resend_resume_link(payload: dict, request: Request):
+    """If a non-expired draft exists for this email, re-send the resume link.
+
+    Always returns a generic 'check your email' message — never reveals whether
+    the email actually has a draft (prevents email-enumeration). Rate-limited
+    to one request per email per 60 seconds via Mongo TTL-ish check.
+    """
+    email = (payload.get("email") or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "A valid email is required")
+
+    # Simple rate-limit: one resend per email per 60s
+    recent_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat()
+    recent = await db.application_drafts.find_one(
+        {"email": email, "last_resent_at": {"$gt": recent_cutoff}},
+        {"_id": 0, "id": 1},
+    )
+    if recent:
+        # Generic message — don't tell them they're being rate-limited
+        return {"status": "ok", "message": "If we found a saved application, we've sent the resume link to your email."}
+
+    # Find the most recent non-expired draft for this email
+    now_iso = datetime.now(timezone.utc).isoformat()
+    drafts = await db.application_drafts.find(
+        {"email": email, "expires_at": {"$gt": now_iso}},
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(1)
+
+    if drafts:
+        draft = drafts[0]
+        prop = await db.properties.find_one({"id": draft["property_id"]}, {"_id": 0}) or {}
+        public_origin = (payload.get("frontend_url") or "").strip().rstrip("/")
+        if not public_origin:
+            public_origin = (request.headers.get("origin") or "").strip().rstrip("/")
+        if not public_origin:
+            ref = request.headers.get("referer") or ""
+            try:
+                from urllib.parse import urlsplit
+                sp = urlsplit(ref)
+                if sp.scheme and sp.netloc:
+                    public_origin = f"{sp.scheme}://{sp.netloc}"
+            except Exception:
+                pass
+        if not public_origin:
+            public_origin = str(request.base_url).rstrip("/")
+        resume_url = f"{public_origin}/resume/{draft['token']}"
+        step_label = STEP_LABELS[draft.get("step") or 0] if 0 <= (draft.get("step") or 0) < len(STEP_LABELS) else ""
+        first_name = ""
+        st = draft.get("state") or {}
+        if isinstance(st, dict):
+            first_name = ((st.get("personal") or {}).get("first_name")) or ""
+        try:
+            await send_templated(db, "application_resume", email, {
+                "name": first_name or email.split("@")[0],
+                "property_name": prop.get("title", "your property"),
+                "resume_url": resume_url,
+                "step_label": step_label,
+            })
+        except Exception as e:
+            logger.warning(f"Resend resume email failed: {e}")
+        await db.application_drafts.update_one(
+            {"id": draft["id"]},
+            {"$set": {"last_resent_at": datetime.now(timezone.utc).isoformat()}},
+        )
+    # Always the same response (anti-enumeration)
+    return {"status": "ok", "message": "If we found a saved application, we've sent the resume link to your email."}
+
+
 # ------------------ Confirmation PDF ------------------
 @api.get("/applications/{application_id}/confirmation-pdf")
 async def application_confirmation_pdf(application_id: str, email: str = Query(...)):

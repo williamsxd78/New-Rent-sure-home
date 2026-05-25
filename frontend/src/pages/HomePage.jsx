@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
 import PropertyCard from "@/components/site/PropertyCard";
+import ResumeApplicationBanner from "@/components/site/ResumeApplicationBanner";
 import { api } from "@/lib/api";
 import {
   ShieldCheck, FileCheck, ScanLine, UserCheck, Scale, BadgeDollarSign,
@@ -176,6 +177,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* RESUME SAVED APPLICATION */}
+      <ResumeApplicationBanner />
 
       {/* REVIEWS */}
       <section className="rs-section" data-testid="reviews-section">
