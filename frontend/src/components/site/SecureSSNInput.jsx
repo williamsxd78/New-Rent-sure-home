@@ -17,43 +17,29 @@ export default function SecureSSNInput({ value, onChange, required, testid = "f-
     digits.length <= 5 ? `${digits.slice(0, 3)}-${digits.slice(3)}` :
     `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
 
-  // When hidden we still preserve the `XXX-XX-XXXX` shape using bullet chars
-  // so the user can see how many digits they've typed even while masked.
-  const maskedDisplay = (() => {
-    const n = digits.length;
-    const bul = (k) => "•".repeat(k);
-    if (n === 0) return "";
-    if (n <= 3) return bul(n);
-    if (n <= 5) return `${bul(3)}-${bul(n - 3)}`;
-    return `${bul(3)}-${bul(2)}-${bul(n - 5)}`;
-  })();
+  // We keep the real (dashed) value in the input but visually mask each
+  // character via CSS `-webkit-text-security: disc`. This gives the user the
+  // requested `•••-••-••••` shape while preserving the underlying digits and
+  // browser caret/selection behavior — typing always appends correctly.
+  const maskStyle = show
+    ? {}
+    : { WebkitTextSecurity: "disc", textSecurity: "disc" };
 
   const handleChange = (e) => {
-    // Always strip dashes/spaces/bullets; cap at 9 digits
     onChange(e.target.value.replace(/\D/g, "").slice(0, 9));
   };
 
   return (
     <div className="relative" data-testid={`${testid}-wrap`}>
       <input
-        type={show ? "text" : "text"}
+        type="text"
         inputMode="numeric"
         autoComplete="off"
         spellCheck={false}
         className="rs-input pr-20 font-mono tracking-wider"
-        value={show ? formatted : maskedDisplay}
+        style={maskStyle}
+        value={formatted}
         onChange={handleChange}
-        onBeforeInput={(e) => {
-          // When masked, ensure only digits can be typed (since input value shows bullets)
-          if (!show && e.data && /\D/.test(e.data)) e.preventDefault();
-        }}
-        onKeyDown={(e) => {
-          // Allow Backspace/Delete/Tab/Arrows; remove a digit when user hits backspace in masked mode
-          if (!show && e.key === "Backspace" && digits.length > 0) {
-            e.preventDefault();
-            onChange(digits.slice(0, -1));
-          }
-        }}
         placeholder="XXX-XX-XXXX"
         maxLength={11}
         required={required}
