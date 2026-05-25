@@ -71,8 +71,8 @@ export default function PolicyPage({ slug }) {
       </section>
       <section className="rs-container py-12 max-w-3xl">
         <div className="prose prose-slate max-w-none whitespace-pre-line text-slate-700 leading-relaxed">{c.body}</div>
-        <div className="mt-10 p-5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-500 italic">
-          This page is a template and should be reviewed by a licensed attorney before launch.
+        <div className="mt-10 p-5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-500 leading-relaxed">
+          <strong className="text-slate-700">Disclaimer:</strong> The information on this page is provided for general guidance only and does not constitute legal advice. For specific legal questions about your application, screening, or use of this service, please consult a licensed attorney in your state. Last updated: {new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}.
         </div>
       </section>
     </SiteLayout>

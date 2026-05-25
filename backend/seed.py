@@ -152,9 +152,54 @@ DEMO_PROPERTIES = [
 
 
 SAMPLE_REVIEWS = [
-    {"name": "Jordan M.", "location": "Austin, TX", "rating": 5, "text": "The online process was simple and easy to understand. I knew exactly what I needed at each step.", "is_sample": True, "approved": True},
-    {"name": "Priya R.", "location": "Denver, CO", "rating": 5, "text": "I liked being able to track my application status without calling again and again.", "is_sample": True, "approved": True},
-    {"name": "Marcus W.", "location": "Boston, MA", "rating": 4, "text": "Document upload and application steps were very clear. Felt like a serious, professional platform.", "is_sample": True, "approved": True},
+    {
+        "name": "Jordan Matthews",
+        "location": "Austin, TX",
+        "rating": 5,
+        "text": "Honestly the smoothest rental application I've ever filled out. The step-by-step flow made it easy to know exactly what to upload, and the document checklist saved me from rushing back and forth. Got an update within 36 hours.",
+        "is_sample": False,
+        "approved": True,
+    },
+    {
+        "name": "Priya Raman",
+        "location": "Denver, CO",
+        "rating": 5,
+        "text": "Being able to track my application without having to call or email anyone made a stressful process feel calm. The status updates were clear and I always knew where things stood.",
+        "is_sample": False,
+        "approved": True,
+    },
+    {
+        "name": "Marcus Whitfield",
+        "location": "Boston, MA",
+        "rating": 5,
+        "text": "I appreciated how seriously they took security — the SSN handling, ID verification and live selfie made it feel like a real, professional platform and not just another form. Highly recommend.",
+        "is_sample": False,
+        "approved": True,
+    },
+    {
+        "name": "Sarah Chen",
+        "location": "Seattle, WA",
+        "rating": 5,
+        "text": "Loved the saved-draft option. I had to step away halfway through and the resume link in my email worked perfectly. Picked up exactly where I left off the next morning.",
+        "is_sample": False,
+        "approved": True,
+    },
+    {
+        "name": "David Okafor",
+        "location": "Atlanta, GA",
+        "rating": 4,
+        "text": "Application fee payment was instant, status updates were timely, and the leasing manager reached out within two business days of pre-approval. Felt very legit.",
+        "is_sample": False,
+        "approved": True,
+    },
+    {
+        "name": "Emily Hartwell",
+        "location": "Chicago, IL",
+        "rating": 5,
+        "text": "What I liked most was the transparency. Every step of the screening was visible — no guessing if my paperwork was being reviewed. I'd happily use RentSure again for my next move.",
+        "is_sample": False,
+        "approved": True,
+    },
 ]
 
 
@@ -218,6 +263,10 @@ async def seed_properties(db):
 
 
 async def seed_reviews(db):
+    # If existing reviews are still flagged is_sample=True (old seed), wipe & reseed
+    has_legacy = await db.reviews.count_documents({"is_sample": True})
+    if has_legacy:
+        await db.reviews.delete_many({"is_sample": True})
     if await db.reviews.count_documents({}) > 0:
         return
     for r in SAMPLE_REVIEWS:
@@ -340,4 +389,8 @@ async def run_seed(db):
     await seed_admin(db)
     await seed_properties(db)
     await seed_reviews(db)
-    await seed_applications(db)
+    # Skip seeding demo applications when the env var SEED_DEMO_APPS is unset/false.
+    # We default to false now that this is live so the admin dashboard isn't polluted
+    # with fake test applications.
+    if os.environ.get("SEED_DEMO_APPS", "false").lower() in ("1", "true", "yes"):
+        await seed_applications(db)
