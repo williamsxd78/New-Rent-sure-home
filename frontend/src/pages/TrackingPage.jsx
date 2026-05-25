@@ -82,6 +82,8 @@ const STATUS_TONE = {
 };
 
 const DOC_ICONS = {
+  "Photo ID — Front Side": IdCard,
+  "Photo ID — Back Side": IdCard,
   "Government ID": IdCard,
   "Driver License": IdCard,
   "Driver's License": IdCard,

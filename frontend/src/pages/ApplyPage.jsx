@@ -32,17 +32,16 @@ const BANK_STATEMENT_REQUIRED_STATUSES = new Set([
 ]);
 
 // Doc types that allow multiple file uploads
-const MULTI_DOC_TYPES = new Set(["Paystub", "Government ID"]);
+const MULTI_DOC_TYPES = new Set(["Paystub"]);
 
 const PAYSTUB_REQUIRED_COUNT = 2;
-const GOV_ID_REQUIRED_COUNT = 2;
 
 const getMissingDocs = (uploaded, employment) => {
   const counts = {};
   uploaded.forEach((u) => { counts[u.type] = (counts[u.type] || 0) + 1; });
   const missing = [];
-  const idCount = counts["Government ID"] || 0;
-  if (idCount < GOV_ID_REQUIRED_COUNT) missing.push(`Government ID (${idCount} of ${GOV_ID_REQUIRED_COUNT})`);
+  if (!counts["Photo ID — Front Side"]) missing.push("Photo ID — Front Side");
+  if (!counts["Photo ID — Back Side"]) missing.push("Photo ID — Back Side");
   const psCount = counts["Paystub"] || 0;
   if (psCount < PAYSTUB_REQUIRED_COUNT) missing.push(`Paystub (${psCount} of ${PAYSTUB_REQUIRED_COUNT})`);
   if (!counts["W-2 / Tax Document"]) missing.push("W-2 / Tax Document");
@@ -616,7 +615,8 @@ function Step6({ d, setTop, update }) {
 }
 
 const DOC_TYPES = [
-  { key: "Government ID", required: true, multiple: true, minCount: 2, hint: "Upload the FRONT and BACK of your government-issued photo ID (Driver License, State ID, Passport, or Permanent Resident Card)" },
+  { key: "Photo ID — Front Side", required: true, hint: "FRONT of your government-issued photo ID (Driver License, State ID, Passport, or PR Card)" },
+  { key: "Photo ID — Back Side", required: true, hint: "BACK of the same photo ID document" },
   { key: "Paystub", required: true, multiple: true, minCount: 2, hint: "Select 2 most recent paystubs (you can pick both files at once)" },
   { key: "W-2 / Tax Document", required: true, hint: "Most recent W-2 or tax return" },
   { key: "SSN Verification", required: true, sensitive: true, hint: "Upload your SSN document — encrypted in transit and at rest." },
