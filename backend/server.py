@@ -1276,15 +1276,23 @@ async def admin_list_applications(
 
 @api.get("/admin/applications/export.csv")
 async def admin_export_applications_csv(
-    status: Optional[str] = None, q: Optional[str] = None, admin=Depends(require_admin)
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    ids: Optional[str] = None,
+    admin=Depends(require_admin),
 ):
-    """Export current applications view as a CSV file."""
+    """Export applications as CSV. If `ids` is provided (comma-separated app ids),
+    only those rows are exported — used by the bulk-select UI."""
     import csv
     from io import StringIO
     query = {}
-    if status:
+    if ids:
+        id_list = [s.strip() for s in ids.split(",") if s.strip()]
+        if id_list:
+            query["id"] = {"$in": id_list}
+    elif status:
         query["decision"] = status
-    if q:
+    if q and not ids:
         query["$or"] = [
             {"applicant_name": {"$regex": q, "$options": "i"}},
             {"applicant_email": {"$regex": q, "$options": "i"}},
@@ -1332,6 +1340,20 @@ async def admin_export_applications_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@api.post("/admin/applications/bulk-delete")
+async def admin_bulk_delete_applications(payload: dict, admin=Depends(require_super_admin)):
+    """Bulk-delete applications by id. Restricted to super_admin to prevent accidental data loss."""
+    ids = payload.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(400, "ids is required (non-empty list)")
+    ids = [str(x) for x in ids if x]
+    if not ids:
+        raise HTTPException(400, "ids is required (non-empty list)")
+    # Best-effort: remove associated draft/audit entries as well
+    res = await db.applications.delete_many({"id": {"$in": ids}})
+    return {"deleted": res.deleted_count, "requested": len(ids)}
 
 
 @api.get("/admin/applications/{app_id}")

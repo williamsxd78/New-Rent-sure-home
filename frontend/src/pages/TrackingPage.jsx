@@ -3,7 +3,7 @@ import { useLocation, Link } from "react-router-dom";
 import SiteLayout from "@/components/site/SiteLayout";
 import { api, STAGE_LABELS, DECISION_LABELS, formatMoney, downloadConfirmationPdf } from "@/lib/api";
 import {
-  Search, CheckCircle2, Clock, AlertTriangle, CircleSlash, Loader2, Mail, MessageSquare,
+  CheckCircle2, Clock, AlertTriangle, Loader2, Mail, MessageSquare,
   Info, Download, FileWarning, ShieldCheck, Lock, Phone, FileText, IdCard, Briefcase,
   CreditCard, FileSearch, Scale, Home, UserCheck, Gavel, BadgeCheck, HelpCircle,
   ChevronRight, Sparkles, Camera, ReceiptText,
@@ -180,10 +180,7 @@ export default function TrackingPage() {
         <form onSubmit={submit} className="rs-card p-5 sm:p-7 max-w-3xl mx-auto grid sm:grid-cols-2 gap-4" data-testid="tracking-form">
           <div className="sm:col-span-1">
             <label className="rs-label">Application ID</label>
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input className="rs-input pl-9 font-mono" value={id} onChange={(e) => setId(e.target.value)} placeholder="APP-XXXXXXXX" data-testid="track-input-id" required />
-            </div>
+            <input className="rs-input font-mono" value={id} onChange={(e) => setId(e.target.value)} placeholder="APP-XXXXXXXX" data-testid="track-input-id" required />
           </div>
           <div>
             <label className="rs-label">Email</label>
