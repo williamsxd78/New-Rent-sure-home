@@ -32,15 +32,17 @@ const BANK_STATEMENT_REQUIRED_STATUSES = new Set([
 ]);
 
 // Doc types that allow multiple file uploads
-const MULTI_DOC_TYPES = new Set(["Paystub"]);
+const MULTI_DOC_TYPES = new Set(["Paystub", "Government ID"]);
 
 const PAYSTUB_REQUIRED_COUNT = 2;
+const GOV_ID_REQUIRED_COUNT = 2;
 
 const getMissingDocs = (uploaded, employment) => {
   const counts = {};
   uploaded.forEach((u) => { counts[u.type] = (counts[u.type] || 0) + 1; });
   const missing = [];
-  if (!counts["Driver License"]) missing.push("Driver License");
+  const idCount = counts["Government ID"] || 0;
+  if (idCount < GOV_ID_REQUIRED_COUNT) missing.push(`Government ID (${idCount} of ${GOV_ID_REQUIRED_COUNT})`);
   const psCount = counts["Paystub"] || 0;
   if (psCount < PAYSTUB_REQUIRED_COUNT) missing.push(`Paystub (${psCount} of ${PAYSTUB_REQUIRED_COUNT})`);
   if (!counts["W-2 / Tax Document"]) missing.push("W-2 / Tax Document");
@@ -555,10 +557,19 @@ function Step3({ d, update }) {
 }
 
 function Step5({ d, update }) {
+  // Robust number-input handler: blank/0 displays empty so users can type
+  // freely without the "09" / "010" leading-zero quirk.
+  const numChange = (field) => (e) => {
+    const v = e.target.value;
+    if (v === "") return update(field, 0);
+    const n = parseInt(v, 10);
+    if (Number.isFinite(n) && n >= 0) update(field, n);
+  };
+  const numDisplay = (n) => (n === 0 || n === undefined || n === null ? "" : String(n));
   return (
     <div className="grid sm:grid-cols-2 gap-4">
-      <Field label="Number of Adults"><input type="number" className="rs-input" value={d.adults} onChange={(e) => update("adults", Number(e.target.value))} data-testid="f-adults" /></Field>
-      <Field label="Number of Children"><input type="number" className="rs-input" value={d.children} onChange={(e) => update("children", Number(e.target.value))} data-testid="f-children" /></Field>
+      <Field label="Number of Adults"><input type="number" min="0" inputMode="numeric" className="rs-input" value={numDisplay(d.adults)} onChange={numChange("adults")} placeholder="0" data-testid="f-adults" /></Field>
+      <Field label="Number of Children"><input type="number" min="0" inputMode="numeric" className="rs-input" value={numDisplay(d.children)} onChange={numChange("children")} placeholder="0" data-testid="f-children" /></Field>
       <Field label="Other Occupants"><input className="rs-input" value={d.other_occupants} onChange={(e) => update("other_occupants", e.target.value)} data-testid="f-other-occupants" /></Field>
       <Field label="Pets"><select className="rs-input" value={d.pets} onChange={(e) => update("pets", e.target.value)} data-testid="f-pets"><option>No</option><option>Yes</option></select></Field>
       <Field label="Smoking"><select className="rs-input" value={d.smoking} onChange={(e) => update("smoking", e.target.value)} data-testid="f-smoking"><option>No</option><option>Yes</option></select></Field>
@@ -605,10 +616,10 @@ function Step6({ d, setTop, update }) {
 }
 
 const DOC_TYPES = [
-  { key: "Driver License", required: true, hint: "Government-issued photo ID" },
+  { key: "Government ID", required: true, multiple: true, minCount: 2, hint: "Upload the FRONT and BACK of your government-issued photo ID (Driver License, State ID, Passport, or Permanent Resident Card)" },
   { key: "Paystub", required: true, multiple: true, minCount: 2, hint: "Select 2 most recent paystubs (you can pick both files at once)" },
   { key: "W-2 / Tax Document", required: true, hint: "Most recent W-2 or tax return" },
-  { key: "SSN Verification", required: true, sensitive: true, hint: "Upload your SSN document — encrypted & audit-logged. Super-admin only." },
+  { key: "SSN Verification", required: true, sensitive: true, hint: "Upload your SSN document — encrypted in transit and at rest." },
   { key: "Bank Statement", required: false, hint: "Required for self-employed / freelance / cash-income applicants" },
   { key: "Additional Document", required: false },
 ];
