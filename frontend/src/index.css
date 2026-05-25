@@ -90,6 +90,27 @@ a[href*="emergent-badge"] {
 .rs-card:hover {
     box-shadow: 0 8px 30px rgba(10, 25, 47, 0.08);
 }
+
+/* Stretched-link pattern: the <Link> inside a card visually appears
+   normal (just the title), but its ::after pseudo-element covers the
+   entire `.rs-card` ancestor — so the whole card is clickable AND
+   supports middle-click / Ctrl+click / right-click "open in new tab",
+   which is critical for paid-ads landing pages. */
+.rs-card-link {
+    color: inherit;
+    text-decoration: none;
+}
+.rs-card-link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: auto;
+    border-radius: inherit;
+}
+.rs-card-link:hover {
+    color: #C5A880;
+}
 .rs-btn-primary {
     @apply inline-flex items-center justify-center gap-2 bg-[#0A192F] text-white hover:bg-[#112240] rounded-lg px-6 py-3 font-medium shadow-sm hover:shadow-md transition-all;
 }
