@@ -30,6 +30,7 @@ import AdminRefundsPage from "@/pages/admin/AdminRefundsPage";
 import AdminAuditPage from "@/pages/admin/AdminAuditPage";
 import AdminSettingsPage from "@/pages/admin/AdminSettingsPage";
 import AdminUsersPage from "@/pages/admin/AdminUsersPage";
+import { ADMIN_LOGIN_PATH } from "@/lib/adminPath";
 
 const POLICIES = [
   "privacy", "terms", "refund", "application-fee", "fair-housing",
@@ -59,7 +60,7 @@ function App() {
               <Route key={slug} path={`/policies/${slug}`} element={<PolicyPage slug={slug} />} />
             ))}
 
-            <Route path="/admin/login" element={<AdminLoginPage />} />
+            <Route path={ADMIN_LOGIN_PATH} element={<AdminLoginPage />} />
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboardPage />} />
               <Route path="properties" element={<AdminPropertiesPage />} />

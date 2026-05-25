@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { ADMIN_LOGIN_PATH } from "@/lib/adminPath";
 import {
   LayoutDashboard, Building2, ClipboardList, Users, CreditCard, FileText,
   Activity, Star, BadgeDollarSign, UserCog, Settings, BookOpen, LogOut, ShieldCheck,
@@ -23,7 +24,7 @@ export default function AdminLayout() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (ready && !user) navigate("/admin/login");
+    if (ready && !user) navigate(ADMIN_LOGIN_PATH);
   }, [ready, user, navigate]);
 
   if (!ready || !user) return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading…</div>;
@@ -58,7 +59,7 @@ export default function AdminLayout() {
             <div className="text-xs text-slate-400">{user.email}</div>
             <div className="text-xs text-[#C5A880] uppercase tracking-widest">{user.role?.replace("_", " ")}</div>
           </div>
-          <button onClick={() => { logout(); navigate("/admin/login"); }} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white" data-testid="admin-logout">
+          <button onClick={() => { logout(); navigate(ADMIN_LOGIN_PATH); }} className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white" data-testid="admin-logout">
             <LogOut className="w-4 h-4" /> Logout
           </button>
         </div>

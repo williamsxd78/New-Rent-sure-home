@@ -47,9 +47,6 @@ export default function Navbar() {
           <button onClick={() => navigate("/track")} className="rs-btn-outline !py-2 !px-4 text-sm" data-testid="nav-track-application">
             Track Application
           </button>
-          <button onClick={() => navigate("/admin/login")} className="rs-btn-primary !py-2 !px-4 text-sm" data-testid="nav-admin-login">
-            Admin Login
-          </button>
         </div>
 
         <button className="lg:hidden p-2" onClick={() => setOpen(!open)} data-testid="nav-toggle">
@@ -73,9 +70,6 @@ export default function Navbar() {
             ))}
             <button onClick={() => { setOpen(false); navigate("/track"); }} className="rs-btn-outline" data-testid="nav-m-track">
               Track Application
-            </button>
-            <button onClick={() => { setOpen(false); navigate("/admin/login"); }} className="rs-btn-primary" data-testid="nav-m-admin">
-              Admin Login
             </button>
           </div>
         </div>

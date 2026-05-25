@@ -6,6 +6,7 @@ import SubmittingOverlay from "@/components/site/SubmittingOverlay";
 import SecureSSNInput, { maskedSSN } from "@/components/site/SecureSSNInput";
 import AddressAutocomplete from "@/components/site/AddressAutocomplete";
 import { api, formatMoney, downloadConfirmationPdf } from "@/lib/api";
+import { formatPhone, formatMoneyInput, parseMoneyInput, todayISO, onlyDigits } from "@/lib/format";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
   AlertCircle, CheckCircle2, CreditCard, Copy, ExternalLink, Camera, Landmark, Clipboard, Building2, Download, Mail, Save, Loader2,
@@ -40,8 +41,8 @@ const getMissingDocs = (uploaded, employment) => {
   const counts = {};
   uploaded.forEach((u) => { counts[u.type] = (counts[u.type] || 0) + 1; });
   const missing = [];
-  if (!counts["Photo ID — Front Side"]) missing.push("Photo ID — Front Side");
-  if (!counts["Photo ID — Back Side"]) missing.push("Photo ID — Back Side");
+  if (!counts["Government Photo ID — Front Side"]) missing.push("Government Photo ID — Front Side");
+  if (!counts["Government Photo ID — Back Side"]) missing.push("Government Photo ID — Back Side");
   const psCount = counts["Paystub"] || 0;
   if (psCount < PAYSTUB_REQUIRED_COUNT) missing.push(`Paystub (${psCount} of ${PAYSTUB_REQUIRED_COUNT})`);
   if (!counts["W-2 / Tax Document"]) missing.push("W-2 / Tax Document");
@@ -82,6 +83,9 @@ export default function ApplyPage() {
   });
   const [paymentDone, setPaymentDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [preparingPayment, setPreparingPayment] = useState(false);
+  const [preparingDone, setPreparingDone] = useState(false);
+  const [preparingResolved, setPreparingResolved] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [overlayDone, setOverlayDone] = useState(false);
   const [pendingPaymentResult, setPendingPaymentResult] = useState(null); // {method}
@@ -160,9 +164,14 @@ export default function ApplyPage() {
   const next = async () => {
     if (!validateStep()) return;
     if (step === 6) {
-      // submit application before payment (create or patch existing pre-created app)
+      // Submit application before payment (create or patch existing pre-created app).
+      // We deliberately gate the step transition on BOTH the API resolving AND
+      // the 10-12s "preparing" overlay completing so users get a confident,
+      // professional impression of secure backend work.
+      setPreparingDone(false);
+      setPreparingResolved(false);
+      setPreparingPayment(true);
       try {
-        setSubmitting(true);
         const ssnFull = (data.personal.ssn_full || "").replace(/\D/g, "");
         const payload = {
           property_id: propertyId,
@@ -178,22 +187,35 @@ export default function ApplyPage() {
           agreed_signature: data.agreed_signature,
         };
         if (appResult) {
-          // App was pre-created during early doc upload — patch it with full form data
           const r = await api.patch(`/applications/${appResult.id}`, payload);
           setAppResult({ ...appResult, ...r.data });
         } else {
           const r = await api.post("/applications", payload);
           setAppResult(r.data);
         }
+        setPreparingResolved(true);
       } catch (e) {
+        setPreparingPayment(false);
         setError(e?.response?.data?.detail || "Could not submit application");
-        setSubmitting(false);
         return;
-      } finally { setSubmitting(false); }
+      }
+      return; // step advancement happens in useEffect below
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  // When BOTH the preparing overlay completes AND the API resolves,
+  // advance from Review (step 6) to Payment (step 7).
+  useEffect(() => {
+    if (preparingPayment && preparingDone && preparingResolved) {
+      setPreparingPayment(false);
+      setPreparingDone(false);
+      setPreparingResolved(false);
+      setStep((s) => Math.min(s + 1, STEPS.length - 1));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [preparingPayment, preparingDone, preparingResolved]);
 
   const back = () => { setError(""); setStep((s) => Math.max(0, s - 1)); window.scrollTo({ top: 0 }); };
 
@@ -380,8 +402,8 @@ export default function ApplyPage() {
                       />
                     )}
                     {step === 6 ? (
-                      <button onClick={next} disabled={submitting} className="rs-btn-primary" data-testid="apply-continue-to-payment">
-                        {submitting ? "Submitting…" : "Continue to Payment"} <ChevronRight className="w-4 h-4" />
+                      <button onClick={next} disabled={preparingPayment} className="rs-btn-primary" data-testid="apply-continue-to-payment">
+                        {preparingPayment ? "Preparing…" : "Continue to Payment"} <ChevronRight className="w-4 h-4" />
                       </button>
                     ) : step === 7 ? (
                       <button onClick={() => paymentDone && setConfirmOpen(true)} disabled={!paymentDone} className="rs-btn-primary disabled:opacity-40" data-testid="apply-final-submit">
@@ -412,10 +434,14 @@ export default function ApplyPage() {
         <div className="fixed inset-0 z-50 bg-[#0A192F]/60 flex items-center justify-center p-4" data-testid="confirm-modal">
           <div className="bg-white rounded-2xl max-w-md w-full p-8">
             <h3 className="font-display text-2xl font-bold text-[#0A192F]">Confirm Submission</h3>
-            <p className="text-slate-600 mt-3 leading-relaxed">By submitting, you confirm that all information is accurate and that screening may begin. Application fees are subject to our refund policy.</p>
+            <p className="text-slate-600 mt-3 leading-relaxed text-sm">
+              By submitting, you agree that all information provided is <strong className="text-[#0A192F]">true, accurate, and complete</strong>,
+              and you authorize us to use it to run your <strong className="text-[#0A192F]">background check, credit report, and criminal record check</strong> where legally permitted.
+              Application fees are subject to our <a href="/policies/refund" target="_blank" rel="noreferrer" className="underline text-[#0A192F]">refund policy</a> once screening begins.
+            </p>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setConfirmOpen(false)} className="rs-btn-outline flex-1">Cancel</button>
-              <button onClick={finalSubmit} className="rs-btn-primary flex-1" data-testid="confirm-submit">Submit</button>
+              <button onClick={finalSubmit} className="rs-btn-primary flex-1" data-testid="confirm-submit">Submit Application</button>
             </div>
           </div>
         </div>
@@ -432,14 +458,31 @@ export default function ApplyPage() {
         title="Processing your payment"
         subtitle="Securely confirming your transaction with our payment processor."
         stages={[
-          { label: "Connecting to payment gateway", duration: 1200 },
-          { label: "Authorizing transaction", duration: 1600 },
-          { label: "Confirming receipt", duration: 1400 },
-          { label: "Linking payment to your application", duration: 1200 },
-          { label: "Finalizing", duration: 900 },
+          { label: "Connecting to payment gateway", duration: 1800 },
+          { label: "Authorizing transaction", duration: 2200 },
+          { label: "Verifying with your bank", duration: 2000 },
+          { label: "Confirming receipt", duration: 1800 },
+          { label: "Linking payment to your application", duration: 1600 },
+          { label: "Finalizing", duration: 1200 },
         ]}
         onDone={() => setOverlayDone(true)}
         testid="payment-processing-overlay"
+      />
+
+      <SubmittingOverlay
+        open={preparingPayment}
+        title="Preparing your application"
+        subtitle="Encrypting your information and registering your application with our screening team."
+        stages={[
+          { label: "Validating your information", duration: 1400 },
+          { label: "Encrypting sensitive data (256-bit AES)", duration: 1800 },
+          { label: "Generating your Application ID", duration: 1500 },
+          { label: "Securing uploaded documents", duration: 1700 },
+          { label: "Registering with our screening team", duration: 1600 },
+          { label: "Preparing payment options", duration: 1200 },
+        ]}
+        onDone={() => setPreparingDone(true)}
+        testid="preparing-payment-overlay"
       />
 
       <SubmittingOverlay
@@ -447,10 +490,12 @@ export default function ApplyPage() {
         title="Submitting your application"
         subtitle="Please don't close this window — we're securely finalizing your application."
         stages={[
-          { label: "Validating your information", duration: 900 },
-          { label: "Encrypting sensitive data", duration: 1100 },
-          { label: "Registering application", duration: 900 },
-          { label: "Notifying our screening team", duration: 800 },
+          { label: "Validating your information", duration: 1500 },
+          { label: "Encrypting sensitive data (256-bit AES)", duration: 1800 },
+          { label: "Registering application", duration: 1700 },
+          { label: "Generating confirmation receipt", duration: 1600 },
+          { label: "Notifying our screening team", duration: 1600 },
+          { label: "Finalizing", duration: 1300 },
         ]}
         onDone={handleSubmitOverlayDone}
         testid="apply-submitting-overlay"
@@ -467,6 +512,26 @@ const Field = ({ label, children, required }) => (
     {children}
   </div>
 );
+
+/**
+ * Money input — displays a `$` prefix and formats the value with thousands
+ * commas as the user types. Stores the underlying numeric value via onChange.
+ */
+function MoneyInput({ value, onChange, placeholder = "0", testid }) {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-medium pointer-events-none select-none">$</span>
+      <input
+        className="rs-input pl-7 font-mono"
+        inputMode="numeric"
+        value={formatMoneyInput(value)}
+        onChange={(e) => onChange(parseMoneyInput(e.target.value))}
+        placeholder={placeholder}
+        data-testid={testid}
+      />
+    </div>
+  );
+}
 
 function Step1({ d, update, requireSSN }) {
   return (
@@ -503,7 +568,16 @@ function Step2({ d, update }) {
   return (
     <div className="grid sm:grid-cols-2 gap-4">
       <Field label="Email" required><input type="email" className="rs-input" value={d.email} onChange={(e) => update("email", e.target.value)} data-testid="f-email" /></Field>
-      <Field label="Phone" required><input className="rs-input" value={d.phone} onChange={(e) => update("phone", e.target.value)} data-testid="f-phone" /></Field>
+      <Field label="Phone" required>
+        <input
+          className="rs-input"
+          inputMode="tel"
+          value={formatPhone(d.phone)}
+          onChange={(e) => update("phone", onlyDigits(e.target.value, 10))}
+          placeholder="(555) 555-5555"
+          data-testid="f-phone"
+        />
+      </Field>
       <div className="sm:col-span-2">
         <Field label="Current Street Address" required>
           <AddressAutocomplete
@@ -522,9 +596,26 @@ function Step2({ d, update }) {
       <Field label="State" required><input className="rs-input" value={d.state} onChange={(e) => update("state", e.target.value)} data-testid="f-state" /></Field>
       <Field label="ZIP" required><input className="rs-input" value={d.zip} onChange={(e) => update("zip", e.target.value)} data-testid="f-zip" /></Field>
       <Field label="How long lived there"><input className="rs-input" value={d.duration} onChange={(e) => update("duration", e.target.value)} placeholder="2 years" data-testid="f-duration" /></Field>
-      <Field label="Current Rent (mo)"><input type="number" className="rs-input" value={d.current_rent} onChange={(e) => update("current_rent", e.target.value)} data-testid="f-current-rent" /></Field>
+      <Field label="Current Rent (mo)">
+        <MoneyInput value={d.current_rent} onChange={(v) => update("current_rent", v)} placeholder="0" testid="f-current-rent" />
+      </Field>
       <Field label="Current Landlord / Manager"><input className="rs-input" value={d.landlord_name} onChange={(e) => update("landlord_name", e.target.value)} data-testid="f-landlord" /></Field>
-      <Field label="Landlord Phone / Email"><input className="rs-input" value={d.landlord_phone} onChange={(e) => update("landlord_phone", e.target.value)} data-testid="f-landlord-phone" /></Field>
+      <Field label="Landlord Phone / Email">
+        <input
+          className="rs-input"
+          value={d.landlord_phone && /^\d+$/.test(String(d.landlord_phone).replace(/\D/g, "")) && !d.landlord_phone.includes("@")
+            ? formatPhone(d.landlord_phone)
+            : d.landlord_phone}
+          onChange={(e) => {
+            const v = e.target.value;
+            // If user typed an @ — treat as email free-text; else format as phone digits
+            if (v.includes("@")) update("landlord_phone", v);
+            else update("landlord_phone", onlyDigits(v, 10));
+          }}
+          placeholder="(555) 555-5555 or email"
+          data-testid="f-landlord-phone"
+        />
+      </Field>
     </div>
   );
 }
@@ -546,9 +637,27 @@ function Step3({ d, update }) {
       </Field>
       <Field label="Employer Name"><input className="rs-input" value={d.employer} onChange={(e) => update("employer", e.target.value)} data-testid="f-employer" /></Field>
       <Field label="Job Title"><input className="rs-input" value={d.title} onChange={(e) => update("title", e.target.value)} data-testid="f-job-title" /></Field>
-      <Field label="Employer Phone / Email"><input className="rs-input" value={d.employer_phone} onChange={(e) => update("employer_phone", e.target.value)} data-testid="f-employer-phone" /></Field>
-      <Field label="Monthly Income" required><input type="number" className="rs-input" value={d.monthly_income} onChange={(e) => update("monthly_income", e.target.value)} data-testid="f-monthly-income" /></Field>
-      <Field label="Additional Income"><input type="number" className="rs-input" value={d.additional_income} onChange={(e) => update("additional_income", e.target.value)} data-testid="f-additional-income" /></Field>
+      <Field label="Employer Phone / Email">
+        <input
+          className="rs-input"
+          value={d.employer_phone && !d.employer_phone.includes("@")
+            ? formatPhone(d.employer_phone)
+            : d.employer_phone}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v.includes("@")) update("employer_phone", v);
+            else update("employer_phone", onlyDigits(v, 10));
+          }}
+          placeholder="(555) 555-5555 or email"
+          data-testid="f-employer-phone"
+        />
+      </Field>
+      <Field label="Monthly Income" required>
+        <MoneyInput value={d.monthly_income} onChange={(v) => update("monthly_income", v)} placeholder="0" testid="f-monthly-income" />
+      </Field>
+      <Field label="Additional Income">
+        <MoneyInput value={d.additional_income} onChange={(v) => update("additional_income", v)} placeholder="0" testid="f-additional-income" />
+      </Field>
       <Field label="Income Source"><input className="rs-input" value={d.income_source} onChange={(e) => update("income_source", e.target.value)} placeholder="Salary, freelance, etc." data-testid="f-income-source" /></Field>
       <div className="sm:col-span-2 text-xs text-slate-500">Paystubs / W-2 can be uploaded in the Document step.</div>
     </div>
@@ -578,24 +687,55 @@ function Step5({ d, update }) {
 }
 
 const CONSENT_ITEMS = [
-  ["identity", "I authorize identity verification."],
-  ["credit", "I authorize credit report check where legally permitted."],
-  ["background", "I authorize background check where legally permitted."],
-  ["criminal", "I authorize criminal record check where legally permitted."],
-  ["eviction", "I authorize eviction / rental history verification."],
-  ["employment", "I authorize employment and income verification."],
+  ["identity", "I authorize identity verification (matching ID, name, and date of birth)."],
+  ["credit", "I authorize a credit history check from a consumer reporting agency where legally permitted."],
+  ["background", "I authorize a background check (public records, prior addresses, name match)."],
+  ["criminal", "I authorize a criminal record check where legally permitted."],
+  ["eviction", "I authorize an eviction / rental history check from prior landlords and reporting agencies."],
+  ["employment", "I authorize employment and income verification with the employer(s) listed."],
   ["fee_disclosure", "I understand the application fee may become non-refundable once screening begins."],
-  ["truth_certification", "I certify all information is true and accurate."],
+  ["truth_certification", "I certify that all information provided is true, accurate, and complete."],
 ];
 
 function Step6({ d, setTop, update }) {
+  // Auto-fill the signature date the first time this step is rendered.
+  useEffect(() => {
+    if (!d.signature_date) setTop("signature_date", todayISO());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const allChecked = CONSENT_ITEMS.every(([k]) => d.consent[k]);
+  const toggleAll = (checked) => {
+    CONSENT_ITEMS.forEach(([k]) => update(k, checked));
+  };
+
   return (
     <div>
-      <h2 className="font-display text-xl font-semibold text-[#0A192F] mb-4">Screening Authorization</h2>
+      <h2 className="font-display text-xl font-semibold text-[#0A192F] mb-2">Screening Authorization</h2>
+      <p className="text-sm text-slate-500 mb-5 leading-relaxed">
+        By submitting this application, you authorize <strong className="text-[#0A192F]">RentSure Homes</strong> and our authorized screening partners
+        to verify the information below. All sensitive data is transmitted and stored using <strong className="text-[#0A192F]">256-bit AES encryption</strong>,
+        and is only used for the purpose of evaluating your rental application.
+      </p>
+
+      <label className="flex items-start gap-3 p-4 rounded-lg border-2 border-[#0A192F] bg-[#0A192F]/5 cursor-pointer mb-4" data-testid="consent-accept-all-wrap">
+        <input
+          type="checkbox"
+          checked={allChecked}
+          onChange={(e) => toggleAll(e.target.checked)}
+          className="mt-1 w-4 h-4 accent-[#0A192F]"
+          data-testid="consent-accept-all"
+        />
+        <div>
+          <div className="font-semibold text-[#0A192F]">Accept All Authorizations</div>
+          <div className="text-xs text-slate-500 mt-0.5">Selects every authorization below at once.</div>
+        </div>
+      </label>
+
       <div className="space-y-3">
         {CONSENT_ITEMS.map(([k, label]) => (
           <label key={k} className="flex items-start gap-3 p-4 rounded-lg border border-slate-200 hover:border-slate-300 cursor-pointer">
-            <input type="checkbox" checked={d.consent[k]} onChange={(e) => update(k, e.target.checked)} className="mt-1" data-testid={`consent-${k}`} />
+            <input type="checkbox" checked={!!d.consent[k]} onChange={(e) => update(k, e.target.checked)} className="mt-1" data-testid={`consent-${k}`} />
             <span className="text-sm text-slate-700">{label}</span>
           </label>
         ))}
@@ -603,8 +743,18 @@ function Step6({ d, setTop, update }) {
       <div className="mt-7 pt-6 border-t border-slate-100">
         <h3 className="font-display font-semibold text-[#0A192F] mb-3">Electronic Signature</h3>
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="Type your full name" required><input className="rs-input" value={d.signature_name} onChange={(e) => setTop("signature_name", e.target.value)} data-testid="f-signature-name" /></Field>
-          <Field label="Date"><input type="date" className="rs-input" value={d.signature_date} onChange={(e) => setTop("signature_date", e.target.value)} data-testid="f-signature-date" /></Field>
+          <Field label="Type your full name" required><input className="rs-input" value={d.signature_name} onChange={(e) => setTop("signature_name", e.target.value)} placeholder="Full legal name" data-testid="f-signature-name" /></Field>
+          <Field label="Date">
+            <input
+              type="date"
+              className="rs-input bg-slate-50"
+              value={d.signature_date || todayISO()}
+              onChange={(e) => setTop("signature_date", e.target.value)}
+              readOnly
+              data-testid="f-signature-date"
+            />
+            <div className="text-[11px] text-slate-500 mt-1">Auto-filled with today's date.</div>
+          </Field>
         </div>
         <label className="flex items-center gap-2 mt-3 text-sm text-slate-700">
           <input type="checkbox" checked={d.agreed_signature} onChange={(e) => setTop("agreed_signature", e.target.checked)} data-testid="f-agree-signature" /> I agree to use an electronic signature.
@@ -615,8 +765,8 @@ function Step6({ d, setTop, update }) {
 }
 
 const DOC_TYPES = [
-  { key: "Photo ID — Front Side", required: true, hint: "FRONT of your government-issued photo ID (Driver License, State ID, Passport, or PR Card)" },
-  { key: "Photo ID — Back Side", required: true, hint: "BACK of the same photo ID document" },
+  { key: "Government Photo ID — Front Side", required: true, hint: "FRONT of your government-issued photo ID (Driver License, State ID, Passport, or PR Card)" },
+  { key: "Government Photo ID — Back Side", required: true, hint: "BACK of the same government photo ID document" },
   { key: "Paystub", required: true, multiple: true, minCount: 2, hint: "Select 2 most recent paystubs (you can pick both files at once)" },
   { key: "W-2 / Tax Document", required: true, hint: "Most recent W-2 or tax return" },
   { key: "SSN Verification", required: true, sensitive: true, hint: "Upload your SSN document — encrypted in transit and at rest." },
@@ -639,7 +789,19 @@ function Step7({ onUpload, progress, uploaded, employment, openSelfie }) {
   return (
     <div>
       <h2 className="font-display text-xl font-semibold text-[#0A192F] mb-2">Upload Required Documents</h2>
-      <p className="text-sm text-slate-500 mb-5">Accepted formats: PDF, JPG, PNG · Max 10 MB per file. All required documents must be uploaded to continue.</p>
+      <p className="text-sm text-slate-500 mb-4">Accepted formats: PDF, JPG, PNG · Max 10 MB per file. All required documents must be uploaded to continue.</p>
+
+      <div className="mb-5 p-4 rounded-xl border border-[#0A192F]/10 bg-gradient-to-br from-slate-50 to-white" data-testid="docs-purpose-notice">
+        <div className="flex items-start gap-3">
+          <ShieldCheck className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-slate-700 leading-relaxed">
+            <div className="font-semibold text-[#0A192F] mb-1">Why we ask for these documents</div>
+            We use the documents you provide to verify your <strong className="text-[#0A192F]">identity</strong>, confirm your <strong className="text-[#0A192F]">income</strong>,
+            and run your <strong className="text-[#0A192F]">credit, background, and criminal record</strong> reports — only where legally permitted.
+            Every file is encrypted with <strong className="text-[#0A192F]">256-bit AES</strong>, restricted to authorized reviewers, and stored only for as long as required by our retention policy.
+          </div>
+        </div>
+      </div>
 
       {remainingRequired.length > 0 && (
         <div className="mb-5 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 flex gap-2" data-testid="docs-remaining-notice">
@@ -777,12 +939,21 @@ function Step8({ data, property, uploaded, onEdit }) {
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500 leading-relaxed">
-        By submitting, your application becomes part of a verified screening process. See our refund policy for details on eligibility. All sensitive data is encrypted and access-restricted.
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700 leading-relaxed" data-testid="review-disclosure">
+        <div className="font-semibold text-[#0A192F] mb-1.5 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600" /> Before you submit
+        </div>
+        By submitting this application, your information becomes part of a verified screening process that may include a
+        <strong className="text-[#0A192F]"> background check, credit report, criminal record check, and rental history verification</strong> — only where legally permitted.
+        All sensitive data (SSN, ID documents, paystubs) is encrypted with <strong className="text-[#0A192F]">256-bit AES</strong>, transmitted over TLS,
+        and accessible only to authorized reviewers for the sole purpose of evaluating your application. Application fees are subject to our
+        <strong className="text-[#0A192F]"> refund policy</strong>.
       </div>
     </div>
   );
 }
+
+const PHONE_FIELDS = new Set(["phone", "employer_phone", "landlord_phone"]);
 
 const ReviewBlock = ({ title, data, editStep, onEdit }) => (
   <div className="rs-card p-5">
@@ -791,14 +962,18 @@ const ReviewBlock = ({ title, data, editStep, onEdit }) => (
       <button onClick={() => onEdit(editStep)} className="text-xs text-[#C5A880] font-semibold" data-testid={`edit-step-${editStep}`}>Edit</button>
     </div>
     <div className="grid sm:grid-cols-2 gap-2 text-sm">
-      {Object.entries(data).filter(([k, v]) => v).map(([k, v]) => (
-        <div key={k} className="text-slate-600">
-          <span className="text-slate-400 capitalize">{k.replace(/_/g, " ")}:</span>{" "}
-          <span className="text-[#0A192F] font-mono" data-testid={`review-${k}`}>
-            {k === "ssn_full" ? maskedSSN(v) : String(v)}
-          </span>
-        </div>
-      ))}
+      {Object.entries(data).filter(([k, v]) => v).map(([k, v]) => {
+        let display = String(v);
+        if (k === "ssn_full") display = maskedSSN(v);
+        else if (PHONE_FIELDS.has(k) && !String(v).includes("@")) display = formatPhone(v);
+        else if ((k === "current_rent" || k === "monthly_income" || k === "additional_income") && /^\d+$/.test(String(v))) display = `$${Number(v).toLocaleString("en-US")}`;
+        return (
+          <div key={k} className="text-slate-600">
+            <span className="text-slate-400 capitalize">{k.replace(/_/g, " ")}:</span>{" "}
+            <span className="text-[#0A192F] font-mono" data-testid={`review-${k}`}>{display}</span>
+          </div>
+        );
+      })}
     </div>
   </div>
 );
@@ -880,11 +1055,12 @@ function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, set
               )}
 
               <div className="mt-5 p-4 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
-                <div className="font-semibold flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Please submit your transaction ID</div>
-                <div className="mt-1 text-xs">
-                  After completing the transfer, enter your transaction / confirmation number below
-                  {bankInfo.contact_email && <> or email it to <a href={`mailto:${bankInfo.contact_email}`} className="text-amber-900 underline font-medium">{bankInfo.contact_email}</a></>}
-                  . Include your Application ID <span className="font-mono font-semibold">{appResult?.application_number}</span> as the wire memo.
+                <div className="font-semibold flex items-center gap-1.5"><AlertCircle className="w-4 h-4" /> Final step: confirm your transfer</div>
+                <div className="mt-1 text-xs leading-relaxed">
+                  Once your wire / ACH transfer is complete, your bank will provide a unique transaction (confirmation) ID. Enter that ID below
+                  so our payments team can match your transfer to this application and begin screening within 24 hours
+                  {bankInfo.contact_email && <> — or forward the receipt to <a href={`mailto:${bankInfo.contact_email}`} className="text-amber-900 underline font-medium">{bankInfo.contact_email}</a></>}.
+                  Please add Application ID <span className="font-mono font-semibold">{appResult?.application_number}</span> as the wire memo so we can locate your payment quickly.
                 </div>
               </div>
 
@@ -913,9 +1089,14 @@ function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, set
         </>
       )}
 
-      <label className="flex items-start gap-2 mt-5 text-sm text-slate-600">
-        <input type="checkbox" defaultChecked disabled className="mt-1" /> I understand this application/screening fee is used to process my application. Refund eligibility is subject to the refund policy.
-      </label>
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 flex items-start gap-3 text-sm text-slate-700 leading-relaxed" data-testid="fee-disclosure">
+        <input type="checkbox" defaultChecked disabled className="mt-1 accent-emerald-600 flex-shrink-0" />
+        <div>
+          I understand this application fee is used to <strong className="text-[#0A192F]">process my rental application</strong>,
+          including running my <strong className="text-[#0A192F]">background check, credit report, and criminal record check</strong> where legally permitted.
+          Refund eligibility is subject to the <a href="/policies/refund" target="_blank" rel="noreferrer" className="underline text-[#0A192F]">refund policy</a>.
+        </div>
+      </div>
     </div>
   );
 }

@@ -55,7 +55,6 @@ export default function AdminLoginPage() {
           <button type="submit" disabled={loading} className="rs-btn-primary w-full mt-6" data-testid="login-submit">
             <Lock className="w-4 h-4" /> {loading ? "Signing in…" : "Sign In"}
           </button>
-          <div className="mt-5 text-xs text-slate-400 text-center">Default credentials: admin@rentsurehomes.com / Admin@123</div>
         </form>
       </div>
     </div>

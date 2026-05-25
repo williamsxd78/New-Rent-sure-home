@@ -82,6 +82,8 @@ const STATUS_TONE = {
 };
 
 const DOC_ICONS = {
+  "Government Photo ID — Front Side": IdCard,
+  "Government Photo ID — Back Side": IdCard,
   "Photo ID — Front Side": IdCard,
   "Photo ID — Back Side": IdCard,
   "Government ID": IdCard,
