@@ -92,6 +92,7 @@ export default function ApplyPage() {
   const [pendingPayPalRedirect, setPendingPayPalRedirect] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState(""); // "paypal" or "bank_transfer"
   const [bankInfo, setBankInfo] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState({ paypal: { enabled: true }, bank_transfer: { enabled: false } });
   const [bankTxnId, setBankTxnId] = useState("");
   const [bankSubmitting, setBankSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({}); // { docType: 0-100 }
@@ -102,7 +103,15 @@ export default function ApplyPage() {
 
   useEffect(() => { api.get(`/properties/${propertyId}`).then((r) => setProperty(r.data)).catch(() => {}); }, [propertyId]);
 
-  useEffect(() => { api.get("/payments/bank-info").then((r) => setBankInfo(r.data)).catch(() => setBankInfo({ enabled: false })); }, []);
+  useEffect(() => {
+    Promise.all([
+      api.get("/payments/methods").then((r) => r.data).catch(() => ({ paypal: { enabled: true }, bank_transfer: { enabled: false } })),
+      api.get("/payments/bank-info").then((r) => r.data).catch(() => ({ enabled: false })),
+    ]).then(([methods, bank]) => {
+      setPaymentMethods(methods);
+      setBankInfo({ ...bank, enabled: methods?.bank_transfer?.enabled && bank?.enabled });
+    });
+  }, []);
 
   useEffect(() => { localStorage.setItem(`rs_apply_${propertyId}`, JSON.stringify(data)); }, [data, propertyId]);
 
@@ -384,7 +393,7 @@ export default function ApplyPage() {
               {step === 4 && <Step6 d={data} setTop={setTop} update={(f, v) => update("consent", f, v)} />}
               {step === 5 && <Step7 onUpload={handleFileUpload} progress={uploadProgress} uploaded={uploaded} employment={data.employment} openSelfie={() => setSelfieOpen(true)} />}
               {step === 6 && <Step8 data={data} property={property} uploaded={uploaded} onEdit={setStep} />}
-              {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod} bankInfo={bankInfo} bankTxnId={bankTxnId} setBankTxnId={setBankTxnId} submitBankTransfer={submitBankTransfer} bankSubmitting={bankSubmitting} />}
+              {step === 7 && <Step9 property={property} appResult={appResult} paymentDone={paymentDone} handlePay={handlePay} paymentMethod={paymentMethod} setPaymentMethod={setPaymentMethod} bankInfo={bankInfo} bankTxnId={bankTxnId} setBankTxnId={setBankTxnId} submitBankTransfer={submitBankTransfer} bankSubmitting={bankSubmitting} paymentMethods={paymentMethods} />}
               {step === 8 && <Step10 appResult={appResult} property={property} applicantEmail={data.contact?.email} />}
 
               {step < 8 && (
@@ -978,9 +987,18 @@ const ReviewBlock = ({ title, data, editStep, onEdit }) => (
   </div>
 );
 
-function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, setPaymentMethod, bankInfo, bankTxnId, setBankTxnId, submitBankTransfer, bankSubmitting }) {
+function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, setPaymentMethod, bankInfo, bankTxnId, setBankTxnId, submitBankTransfer, bankSubmitting, paymentMethods }) {
   const fee = appResult?.application_fee || property?.application_fee || 0;
   const bankEnabled = bankInfo?.enabled;
+  const paypalEnabled = paymentMethods?.paypal?.enabled !== false;
+
+  // Auto-select the sole available method
+  useEffect(() => {
+    if (paymentMethod) return;
+    if (paypalEnabled && bankEnabled) return; // user chooses
+    if (paypalEnabled) setPaymentMethod("paypal");
+    else if (bankEnabled) setPaymentMethod("bank_transfer");
+  }, [paypalEnabled, bankEnabled, paymentMethod, setPaymentMethod]);
 
   const copyVal = (v) => navigator.clipboard?.writeText(v || "");
 
@@ -994,24 +1012,31 @@ function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, set
         <div className="text-sm text-slate-500 mt-1">Application No.: <span className="font-mono text-[#0A192F]">{appResult?.application_number}</span></div>
       </div>
 
+      {!paypalEnabled && !bankEnabled && (
+        <div className="mt-5 rs-card p-7 border-amber-200 bg-amber-50 text-amber-900" data-testid="no-payment-methods">
+          <div className="font-display font-semibold flex items-center gap-2"><AlertCircle className="w-5 h-5" /> Payment temporarily unavailable</div>
+          <p className="text-sm mt-2">Our payment methods are being updated. Please contact <a href="mailto:support@rentsurehomes.com" className="underline font-medium">support@rentsurehomes.com</a> to complete your application.</p>
+        </div>
+      )}
+
       {paymentDone ? (
         <div className="mt-5 rs-card p-7 border-emerald-200 bg-emerald-50/50" data-testid="payment-success-card">
           <div className="flex items-center gap-2 text-emerald-700 font-display font-semibold text-lg"><CheckCircle2 className="w-5 h-5" /> Payment Submitted</div>
           <p className="text-sm text-slate-600 mt-2">You can now submit your application. {paymentMethod === "bank_transfer" && "We'll verify your bank transfer shortly and update your status."}</p>
         </div>
-      ) : (
+      ) : (paypalEnabled || bankEnabled) && (
         <>
-          {/* Method picker */}
-          <div className={`mt-5 grid ${bankEnabled ? "sm:grid-cols-2" : "grid-cols-1"} gap-3`} data-testid="payment-method-picker">
-            <button
-              onClick={() => setPaymentMethod("paypal")}
-              className={`rs-card p-5 text-left transition ${paymentMethod === "paypal" ? "ring-2 ring-[#0A192F]" : "hover:bg-slate-50"}`}
-              data-testid="method-paypal"
-            >
-              <div className="flex items-center gap-2 text-[#0A192F] font-display font-semibold"><CreditCard className="w-5 h-5 text-[#C5A880]" /> PayPal</div>
-              <div className="text-xs text-slate-500 mt-1">Pay securely with PayPal. Instant confirmation.</div>
-            </button>
-            {bankEnabled && (
+          {/* Method picker — only show when both options are available */}
+          {paypalEnabled && bankEnabled && (
+            <div className="mt-5 grid sm:grid-cols-2 gap-3" data-testid="payment-method-picker">
+              <button
+                onClick={() => setPaymentMethod("paypal")}
+                className={`rs-card p-5 text-left transition ${paymentMethod === "paypal" ? "ring-2 ring-[#0A192F]" : "hover:bg-slate-50"}`}
+                data-testid="method-paypal"
+              >
+                <div className="flex items-center gap-2 text-[#0A192F] font-display font-semibold"><CreditCard className="w-5 h-5 text-[#C5A880]" /> PayPal</div>
+                <div className="text-xs text-slate-500 mt-1">Pay securely with PayPal. Instant confirmation.</div>
+              </button>
               <button
                 onClick={() => setPaymentMethod("bank_transfer")}
                 className={`rs-card p-5 text-left transition ${paymentMethod === "bank_transfer" ? "ring-2 ring-[#0A192F]" : "hover:bg-slate-50"}`}
@@ -1020,11 +1045,11 @@ function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, set
                 <div className="flex items-center gap-2 text-[#0A192F] font-display font-semibold"><Landmark className="w-5 h-5 text-[#C5A880]" /> Bank Transfer</div>
                 <div className="text-xs text-slate-500 mt-1">Wire / ACH. Verified within 24 hours.</div>
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* PayPal action */}
-          {paymentMethod === "paypal" && (
+          {paymentMethod === "paypal" && paypalEnabled && (
             <div className="mt-5 rs-card p-7 flex items-center justify-between flex-wrap gap-4" data-testid="paypal-pane">
               <div className="text-sm text-slate-600">You'll be redirected to PayPal to complete payment securely.</div>
               <button onClick={handlePay} className="rs-btn-gold" data-testid="paypal-pay-btn">

@@ -511,6 +511,11 @@ async def payment_init(payload: PaymentInit, request: Request):
             "already_paid": True,
         }
 
+    # Admin can disable PayPal as a payment option entirely
+    pp_settings = (await db.settings.find_one({"id": "global"}, {"_id": 0}) or {}).get("paypal") or {}
+    if pp_settings.get("enabled") is False:
+        raise HTTPException(400, "PayPal payments are currently disabled")
+
     cfg = await get_paypal_config(db)
     origin = request.headers.get("origin") or os.environ.get("FRONTEND_URL", "")
 
@@ -608,6 +613,20 @@ async def payment_capture(request: Request, application_id: str = Form(...), ord
 
 
 # ------------------ Bank Transfer (alternate payment) ------------------
+@api.get("/payments/methods")
+async def public_payment_methods():
+    """Public — returns which payment methods are currently enabled."""
+    s = await db.settings.find_one({"id": "global"}, {"_id": 0}) or {}
+    pp = s.get("paypal") or {}
+    bt = s.get("bank_transfer") or {}
+    # PayPal is enabled by default unless explicitly toggled off
+    paypal_enabled = pp.get("enabled") is not False
+    return {
+        "paypal": {"enabled": paypal_enabled, "mode": pp.get("mode", "demo")},
+        "bank_transfer": {"enabled": bool(bt.get("enabled"))},
+    }
+
+
 @api.get("/payments/bank-info")
 async def public_bank_info():
     """Public — returns bank account details for applicant wire/transfer instructions."""
@@ -1340,10 +1359,11 @@ async def admin_update_screening(app_id: str, payload: ScreeningUpdate, admin=De
         "notes": payload.notes,
         "completed_at": now if payload.status == "completed" else None,
     }
-    # Also update timeline mirror
+    # Also update timeline mirror (final_review screening key → manager_final_review timeline key)
     timeline = a.get("timeline") or _initial_timeline()
+    timeline_key = "manager_final_review" if payload.key == "final_review" else payload.key
     for t in timeline:
-        if t["key"] == payload.key:
+        if t["key"] == timeline_key:
             t["status"] = payload.status
             t["date"] = now if payload.status == "completed" else t.get("date")
     await db.applications.update_one(
@@ -1353,6 +1373,42 @@ async def admin_update_screening(app_id: str, payload: ScreeningUpdate, admin=De
 
 
 DOC_STATUSES = {"uploaded", "verified", "rejected", "replacement_requested"}
+TIMELINE_STATUSES = {"pending", "in_progress", "completed", "issue_found", "not_required"}
+
+
+@api.post("/admin/applications/{app_id}/timeline")
+async def admin_update_timeline_stage(app_id: str, payload: dict, admin=Depends(require_admin)):
+    """Admin marks a specific timeline stage (e.g. `documents_received`,
+    `manager_final_review`) with a status + optional note. Used for stages
+    that don't have a `screening` counterpart."""
+    key = payload.get("key")
+    status = payload.get("status")
+    note = (payload.get("note") or "").strip()
+    if not key or status not in TIMELINE_STATUSES:
+        raise HTTPException(400, "Invalid timeline payload")
+    now = datetime.now(timezone.utc).isoformat()
+    a = await db.applications.find_one({"id": app_id}, {"_id": 0})
+    if not a:
+        raise HTTPException(404, "Application not found")
+    timeline = a.get("timeline") or _initial_timeline()
+    found = False
+    for t in timeline:
+        if t["key"] == key:
+            t["status"] = status
+            t["date"] = now if status == "completed" else t.get("date")
+            if note:
+                t["note"] = note
+            elif "note" in t and not note:
+                # leave existing note alone if blank passed
+                pass
+            found = True
+            break
+    if not found:
+        raise HTTPException(400, f"Unknown timeline key: {key}")
+    await db.applications.update_one(
+        {"id": app_id}, {"$set": {"timeline": timeline, "updated_at": now}}
+    )
+    return {"status": "ok"}
 
 
 @api.patch("/admin/applications/{app_id}/documents/{idx}")

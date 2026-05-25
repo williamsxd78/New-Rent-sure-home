@@ -18,7 +18,7 @@ export default function AdminSettingsPage() {
     const r = await api.get("/admin/settings");
     setS({
       smtp: { host: "", port: 587, username: "", password: "", from_email: "", use_tls: true, enabled: false, ...(r.data.smtp || {}) },
-      paypal: { mode: "demo", client_id: "", client_secret: "", ...(r.data.paypal || {}) },
+      paypal: { enabled: true, mode: "demo", client_id: "", client_secret: "", ...(r.data.paypal || {}) },
       bank_transfer: {
         enabled: false, bank_name: "", account_name: "", account_number: "", routing_number: "",
         bank_address: "", instructions: "", contact_email: "",
@@ -89,9 +89,25 @@ export default function AdminSettingsPage() {
 
       {tab === "paypal" && (
         <div className="rs-card p-7" data-testid="paypal-section">
-          <div className="flex items-center gap-2 mb-1"><CreditCard className="w-5 h-5 text-[#C5A880]" /><h2 className="font-display font-semibold text-[#0A192F] text-lg">PayPal Integration</h2></div>
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-1">
+            <div className="flex items-center gap-2"><CreditCard className="w-5 h-5 text-[#C5A880]" /><h2 className="font-display font-semibold text-[#0A192F] text-lg">PayPal Integration</h2></div>
+            <label className="inline-flex items-center gap-2 cursor-pointer select-none" data-testid="paypal-enabled-wrap">
+              <input
+                type="checkbox"
+                checked={s.paypal.enabled !== false}
+                onChange={(e) => updatePp("enabled", e.target.checked)}
+                className="w-4 h-4 accent-emerald-600"
+                data-testid="paypal-enabled-toggle"
+              />
+              <span className={`text-sm font-medium ${s.paypal.enabled === false ? "text-slate-400" : "text-emerald-700"}`}>
+                {s.paypal.enabled === false ? "Disabled" : "Enabled"}
+              </span>
+            </label>
+          </div>
           <p className="text-sm text-slate-500 mb-5">
-            Demo mode keeps the application fee flow simulated. Switch to Sandbox or Live and add your credentials to enable real PayPal payments — instantly.
+            {s.paypal.enabled === false
+              ? "PayPal is currently disabled. Applicants will only see Bank Transfer (if enabled) on the payment step."
+              : "Demo mode keeps the application fee flow simulated. Switch to Sandbox or Live and add your credentials to enable real PayPal payments — instantly."}
           </p>
 
           <div className="grid sm:grid-cols-2 gap-4">

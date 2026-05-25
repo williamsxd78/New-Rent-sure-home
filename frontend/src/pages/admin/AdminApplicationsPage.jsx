@@ -5,6 +5,13 @@ import { Search, Eye, FileText, CheckCircle2, AlertTriangle, MessageSquare, X, L
 
 const SCREENING_KEYS = ["identity_verification", "income_verification", "credit_report", "background_check", "criminal_record", "rental_history", "final_review"];
 
+// Timeline stages that don't have a `screening` counterpart — admin manages
+// these directly from the Screening tab via /admin/applications/:id/timeline.
+const EXTRA_TIMELINE_STAGES = [
+  { key: "documents_received", label: "Documents Received" },
+  { key: "manager_final_review", label: "Manager Final Review" },
+];
+
 const STATUSES = ["pending", "in_progress", "completed", "issue_found", "not_required"];
 
 const SSN_REASONS = [
@@ -47,6 +54,11 @@ export default function AdminApplicationsPage() {
 
   const updateScreening = async (key, status, notes = "") => {
     await api.post(`/admin/applications/${selected.id}/screening`, { key, status, notes });
+    openApp(selected.id);
+  };
+
+  const updateTimelineStage = async (key, status, note = "") => {
+    await api.post(`/admin/applications/${selected.id}/timeline`, { key, status, note });
     openApp(selected.id);
   };
 
@@ -109,13 +121,13 @@ export default function AdminApplicationsPage() {
       </div>
 
       {selected && (
-        <ApplicationDetailModal app={selected} onClose={() => setSelected(null)} updateScreening={updateScreening} setDecision={setDecision} markPayment={markPayment} reviewDocument={reviewDocument} />
+        <ApplicationDetailModal app={selected} onClose={() => setSelected(null)} updateScreening={updateScreening} updateTimelineStage={updateTimelineStage} setDecision={setDecision} markPayment={markPayment} reviewDocument={reviewDocument} />
       )}
     </div>
   );
 }
 
-function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, markPayment, reviewDocument }) {
+function ApplicationDetailModal({ app, onClose, updateScreening, updateTimelineStage, setDecision, markPayment, reviewDocument }) {
   const { user } = useAuth();
   const [tab, setTab] = useState("overview");
   const [decisionDraft, setDecisionDraft] = useState({ decision: app.decision || "", note: app.decision_note || "", applicant_message: app.applicant_message || "" });
@@ -211,6 +223,23 @@ function ApplicationDetailModal({ app, onClose, updateScreening, setDecision, ma
 
           {tab === "screening" && (
             <div className="space-y-3">
+              {EXTRA_TIMELINE_STAGES.map(({ key, label }) => {
+                const tl = (app.timeline || []).find((t) => t.key === key) || { status: "pending", note: "" };
+                return (
+                  <div key={key} className="rs-card p-5 border-l-4 border-l-[#C5A880]" data-testid={`timeline-${key}`}>
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <div className="font-medium text-[#0A192F]">{label}</div>
+                        <div className="text-[11px] text-slate-400">Manual timeline stage</div>
+                      </div>
+                      <select className="rs-input !py-2 !w-auto" value={tl.status} onChange={(e) => updateTimelineStage(key, e.target.value, tl.note || "")} data-testid={`timeline-status-${key}`}>
+                        {STATUSES.map((st) => <option key={st} value={st}>{st.replace(/_/g, " ")}</option>)}
+                      </select>
+                    </div>
+                    <input className="rs-input mt-3 text-sm" placeholder="Add note (optional)…" defaultValue={tl.note || ""} onBlur={(e) => e.target.value !== (tl.note || "") && updateTimelineStage(key, tl.status, e.target.value)} />
+                  </div>
+                );
+              })}
               {SCREENING_KEYS.map((k) => {
                 const s = app.screening?.[k] || { status: "pending", notes: "" };
                 return (
