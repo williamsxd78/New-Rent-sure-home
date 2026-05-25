@@ -4,6 +4,7 @@ import SiteLayout from "@/components/site/SiteLayout";
 import SelfieCapture from "@/components/site/SelfieCapture";
 import SubmittingOverlay from "@/components/site/SubmittingOverlay";
 import SecureSSNInput, { maskedSSN } from "@/components/site/SecureSSNInput";
+import AddressAutocomplete from "@/components/site/AddressAutocomplete";
 import { api, formatMoney, downloadConfirmationPdf } from "@/lib/api";
 import {
   ShieldCheck, ChevronLeft, ChevronRight, Upload, FileCheck, Lock,
@@ -51,7 +52,7 @@ const getMissingDocs = (uploaded, employment) => {
 
 const blank = {
   personal: { first_name: "", middle_name: "", last_name: "", dob: "", id_type: "Driver License", id_number: "", ssn_full: "", marital_status: "" },
-  contact: { email: "", phone: "", current_address: "", city: "", state: "", zip: "", duration: "", current_rent: "", landlord_name: "", landlord_phone: "" },
+  contact: { email: "", phone: "", current_address: "", unit: "", city: "", state: "", zip: "", duration: "", current_rent: "", landlord_name: "", landlord_phone: "" },
   employment: { status: "Employed", employer: "", title: "", employer_phone: "", monthly_income: "", additional_income: "", income_source: "" },
   occupants: { adults: 1, children: 0, other_occupants: "", pets: "No", smoking: "No", move_in_date: "" },
   consent: { identity: false, credit: false, background: false, criminal: false, eviction: false, employment: false, fee_disclosure: false, truth_certification: false },
@@ -480,11 +481,32 @@ function Step1({ d, update, requireSSN }) {
 }
 
 function Step2({ d, update }) {
+  const fillFromPlace = ({ street, unit, city, state, zip }) => {
+    // Only overwrite city/state/zip when Google found them (don't blank user-edited values).
+    if (street) update("current_address", street);
+    if (unit) update("unit", unit);
+    if (city) update("city", city);
+    if (state) update("state", state);
+    if (zip) update("zip", zip);
+  };
   return (
     <div className="grid sm:grid-cols-2 gap-4">
       <Field label="Email" required><input type="email" className="rs-input" value={d.email} onChange={(e) => update("email", e.target.value)} data-testid="f-email" /></Field>
       <Field label="Phone" required><input className="rs-input" value={d.phone} onChange={(e) => update("phone", e.target.value)} data-testid="f-phone" /></Field>
-      <Field label="Current Street Address" required><input className="rs-input" value={d.current_address} onChange={(e) => update("current_address", e.target.value)} data-testid="f-addr" /></Field>
+      <div className="sm:col-span-2">
+        <Field label="Current Street Address" required>
+          <AddressAutocomplete
+            value={d.current_address}
+            onChange={(v) => update("current_address", v)}
+            onSelect={fillFromPlace}
+            placeholder="Start typing — e.g. 1600 Pennsylvania Ave"
+            required
+            testid="f-addr"
+          />
+          <p className="text-[11px] text-slate-500 mt-1">Pick a suggestion to auto-fill city, state &amp; ZIP. You can edit any field after.</p>
+        </Field>
+      </div>
+      <Field label="Apartment / Unit (optional)"><input className="rs-input" value={d.unit} onChange={(e) => update("unit", e.target.value)} placeholder="Apt 4B, Unit 12, etc." data-testid="f-unit" /></Field>
       <Field label="City" required><input className="rs-input" value={d.city} onChange={(e) => update("city", e.target.value)} data-testid="f-city" /></Field>
       <Field label="State" required><input className="rs-input" value={d.state} onChange={(e) => update("state", e.target.value)} data-testid="f-state" /></Field>
       <Field label="ZIP" required><input className="rs-input" value={d.zip} onChange={(e) => update("zip", e.target.value)} data-testid="f-zip" /></Field>
