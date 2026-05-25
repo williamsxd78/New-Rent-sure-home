@@ -520,9 +520,9 @@ const Field = ({ label, children, required }) => (
 function MoneyInput({ value, onChange, placeholder = "0", testid }) {
   return (
     <div className="relative">
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-medium pointer-events-none select-none">$</span>
+      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 font-semibold pointer-events-none select-none">$</span>
       <input
-        className="rs-input pl-7 font-mono"
+        className="rs-input !pl-9 font-mono"
         inputMode="numeric"
         value={formatMoneyInput(value)}
         onChange={(e) => onChange(parseMoneyInput(e.target.value))}

@@ -3,11 +3,14 @@ import { Eye, EyeOff, Lock } from "lucide-react";
 
 /**
  * Secure 9-digit SSN input.
- * - Uses `type="password"` when hidden so the browser handles per-character masking
- *   natively — fixes the bug where the bullets-as-value approach trapped input
- *   after the first digit
- * - Toggle reveals the formatted SSN (`XXX-XX-XXXX`) via `type="text"`
- * - Backend value (via onChange) is always the raw 9-digit string with no dashes
+ *
+ * Implementation: a normal text input holds the formatted value (`XXX-XX-XXXX`)
+ * so typing, paste, caret, selection and mobile keyboards all work natively.
+ * When `show=false`, the input text is made transparent (caret stays visible)
+ * and an absolutely-positioned overlay renders the masked form `•••-••-••••`
+ * with real dashes. Toggling the eye makes the input text visible again.
+ *
+ * This works in every browser (no dependency on `-webkit-text-security`).
  */
 export default function SecureSSNInput({ value, onChange, required, testid = "f-ssn-full" }) {
   const [show, setShow] = useState(false);
@@ -17,13 +20,9 @@ export default function SecureSSNInput({ value, onChange, required, testid = "f-
     digits.length <= 5 ? `${digits.slice(0, 3)}-${digits.slice(3)}` :
     `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
 
-  // We keep the real (dashed) value in the input but visually mask each
-  // character via CSS `-webkit-text-security: disc`. This gives the user the
-  // requested `•••-••-••••` shape while preserving the underlying digits and
-  // browser caret/selection behavior — typing always appends correctly.
-  const maskStyle = show
-    ? {}
-    : { WebkitTextSecurity: "disc", textSecurity: "disc" };
+  // Build masked display: same layout as `formatted`, but every digit replaced
+  // with a bullet. Dashes stay visible → `•••-••-••••` style.
+  const maskedDisplay = formatted.replace(/\d/g, "•");
 
   const handleChange = (e) => {
     onChange(e.target.value.replace(/\D/g, "").slice(0, 9));
@@ -37,7 +36,7 @@ export default function SecureSSNInput({ value, onChange, required, testid = "f-
         autoComplete="off"
         spellCheck={false}
         className="rs-input pr-20 font-mono tracking-wider"
-        style={maskStyle}
+        style={!show ? { color: "transparent", caretColor: "#0A192F" } : undefined}
         value={formatted}
         onChange={handleChange}
         placeholder="XXX-XX-XXXX"
@@ -46,6 +45,15 @@ export default function SecureSSNInput({ value, onChange, required, testid = "f-
         data-testid={testid}
         aria-label="Social Security Number"
       />
+      {/* Masked overlay — visible only when hidden and at least 1 digit entered */}
+      {!show && digits.length > 0 && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 right-20 px-4 flex items-center font-mono tracking-wider text-[#0A192F] select-none pointer-events-none"
+        >
+          {maskedDisplay}
+        </div>
+      )}
       <div className="absolute inset-y-0 right-2 flex items-center gap-1.5 text-slate-400">
         <Lock className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
         <button
