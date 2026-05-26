@@ -32,7 +32,7 @@ export default function PropertyCard({ p }) {
           loading="lazy"
         />
         <div className="absolute top-3 left-3 flex flex-wrap gap-1.5 z-[1]">
-          {(p.tags || []).slice(0, 2).map((t) => (
+          {(p.tags || []).filter((t) => t && t.toLowerCase() !== "imported").slice(0, 2).map((t) => (
             <span key={t} className="px-2.5 py-1 rounded-full bg-white/90 backdrop-blur text-[10px] uppercase tracking-wider font-semibold text-[#0A192F] flex items-center gap-1">
               {t === "Verified" && <BadgeCheck className="w-3 h-3 text-emerald-600" />}
               {t}

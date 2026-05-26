@@ -5,12 +5,13 @@ import { api, formatMoney, resolvePropertyImage, BACKEND_URL } from "@/lib/api";
 import {
   MapPin, Bed, Bath, Maximize, Calendar, Car, Zap, PawPrint, FileText,
   ShieldCheck, BadgeCheck, AlertCircle, CircleDollarSign, Lock, Share2, Check,
+  Grid3x3, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 
 export default function PropertyDetailsPage() {
   const { id } = useParams();
   const [p, setP] = useState(null);
-  const [active, setActive] = useState(0);
+  const [lightbox, setLightbox] = useState(-1); // -1 = closed, else image index
 
   useEffect(() => { api.get(`/properties/${id}`).then((r) => setP(r.data)); }, [id]);
 
@@ -21,31 +22,23 @@ export default function PropertyDetailsPage() {
       <section className="rs-container py-10" data-testid="property-details">
         <Link to="/properties" className="text-sm text-slate-500 hover:text-[#0A192F]">← Back to Properties</Link>
 
-        {/* Gallery */}
-        <div className="mt-6 grid lg:grid-cols-4 gap-3" data-testid="property-gallery">
-          <div className="lg:col-span-3 aspect-[16/10] rounded-2xl overflow-hidden bg-slate-100">
-            <img src={resolvePropertyImage(p, active)} alt={p.title} className="w-full h-full object-cover" />
-          </div>
-          <div className="grid grid-cols-3 lg:grid-cols-1 gap-3">
-            {(p.images || []).map((img, i) => (
-              <button
-                key={i}
-                onClick={() => setActive(i)}
-                className={`aspect-[4/3] rounded-xl overflow-hidden border-2 transition ${active === i ? "border-[#0A192F]" : "border-transparent"}`}
-                data-testid={`gallery-thumb-${i}`}
-              >
-                <img src={resolvePropertyImage(p, i)} alt="" className="w-full h-full object-cover" />
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Premium gallery — hero + 4 thumb grid + lightbox.
+            Fixed-height row keeps the page from breaking with many images. */}
+        <PropertyGallery property={p} onOpen={(i) => setLightbox(i)} />
+        {lightbox >= 0 && (
+          <Lightbox
+            property={p}
+            startIndex={lightbox}
+            onClose={() => setLightbox(-1)}
+          />
+        )}
 
         <div className="mt-10 grid lg:grid-cols-3 gap-10">
           <div className="lg:col-span-2 space-y-8">
             {/* Title */}
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
-                {(p.tags || []).map((t) => (
+                {(p.tags || []).filter((t) => t && t.toLowerCase() !== "imported").map((t) => (
                   <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-semibold">
                     <BadgeCheck className="w-3 h-3" /> {t}
                   </span>
@@ -172,6 +165,179 @@ const Row = ({ label, value, icon: Icon }) => (
     </div>
   </div>
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Premium image gallery — Zillow/Airbnb-style hero + 4 thumb grid
+// Layout never breaks regardless of image count (1, 5, or 50).
+// ─────────────────────────────────────────────────────────────────────────────
+function PropertyGallery({ property, onOpen }) {
+  const images = property.images || [];
+  const n = images.length;
+
+  if (n === 0) {
+    return (
+      <div className="mt-6 aspect-[16/9] rounded-2xl bg-slate-100 flex items-center justify-center text-slate-400">
+        No photos yet
+      </div>
+    );
+  }
+
+  // 1-image: simple hero only
+  if (n === 1) {
+    return (
+      <div className="mt-6 aspect-[16/9] rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative" data-testid="property-gallery">
+        <img src={resolvePropertyImage(property, 0)} alt={property.title} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500" onClick={() => onOpen(0)} />
+      </div>
+    );
+  }
+
+  // 2-image: side by side
+  if (n === 2) {
+    return (
+      <div className="mt-6 grid grid-cols-2 gap-2 sm:gap-3 h-[280px] sm:h-[420px] lg:h-[480px]" data-testid="property-gallery">
+        {[0, 1].map((i) => (
+          <button key={i} onClick={() => onOpen(i)} className="rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group">
+            <img src={resolvePropertyImage(property, i)} alt={`${property.title} photo ${i + 1}`} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500" />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // 3+ images: hero (left) + 2×2 thumbnail grid (right) — fixed-height row
+  // so it never overflows even with 50 images.
+  const extra = Math.max(0, n - 5);
+  return (
+    <div
+      className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 h-auto lg:h-[480px]"
+      data-testid="property-gallery"
+    >
+      {/* Hero */}
+      <button
+        onClick={() => onOpen(0)}
+        className="aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative"
+        data-testid="gallery-hero"
+      >
+        <img
+          src={resolvePropertyImage(property, 0)}
+          alt={property.title}
+          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
+        />
+      </button>
+
+      {/* 2x2 thumb grid */}
+      <div className="grid grid-cols-2 grid-rows-2 gap-2 sm:gap-3 h-[200px] sm:h-[320px] lg:h-full">
+        {[1, 2, 3, 4].map((i) => {
+          if (i >= n) {
+            return <div key={i} className="rounded-2xl bg-slate-50 border border-slate-100" />;
+          }
+          const isLastVisible = i === 4 && extra > 0;
+          return (
+            <button
+              key={i}
+              onClick={() => onOpen(i)}
+              className="rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative"
+              data-testid={`gallery-thumb-${i}`}
+            >
+              <img
+                src={resolvePropertyImage(property, i)}
+                alt={`${property.title} photo ${i + 1}`}
+                className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+              />
+              {isLastVisible && (
+                <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white" data-testid="gallery-more-overlay">
+                  <Grid3x3 className="w-6 h-6 mb-1" />
+                  <div className="font-display font-semibold">+{extra} photos</div>
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Lightbox({ property, startIndex, onClose }) {
+  const images = property.images || [];
+  const [idx, setIdx] = useState(startIndex);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight") setIdx((i) => (i + 1) % images.length);
+      else if (e.key === "ArrowLeft") setIdx((i) => (i - 1 + images.length) % images.length);
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [images.length, onClose]);
+
+  if (!images.length) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4"
+      onClick={onClose}
+      data-testid="property-lightbox"
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-5 right-5 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white"
+        aria-label="Close gallery"
+        data-testid="lightbox-close"
+      >
+        <X className="w-6 h-6" />
+      </button>
+      <div className="absolute top-5 left-5 text-white/80 text-sm font-medium" data-testid="lightbox-counter">
+        {idx + 1} / {images.length}
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); setIdx((i) => (i - 1 + images.length) % images.length); }}
+        className="absolute left-3 sm:left-6 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white"
+        aria-label="Previous photo"
+        data-testid="lightbox-prev"
+      >
+        <ChevronLeft className="w-7 h-7" />
+      </button>
+      <img
+        src={resolvePropertyImage(property, idx)}
+        alt={`${property.title} photo ${idx + 1}`}
+        className="max-w-[92vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
+      <button
+        onClick={(e) => { e.stopPropagation(); setIdx((i) => (i + 1) % images.length); }}
+        className="absolute right-3 sm:right-6 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white"
+        aria-label="Next photo"
+        data-testid="lightbox-next"
+      >
+        <ChevronRight className="w-7 h-7" />
+      </button>
+
+      {/* Thumbnail strip */}
+      <div
+        className="absolute bottom-5 left-1/2 -translate-x-1/2 flex gap-1.5 max-w-[92vw] overflow-x-auto pb-1"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {images.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setIdx(i)}
+            className={`flex-shrink-0 w-16 h-12 rounded-md overflow-hidden border-2 ${i === idx ? "border-[#C5A880]" : "border-transparent opacity-60 hover:opacity-100"} transition`}
+            aria-label={`Go to photo ${i + 1}`}
+            data-testid={`lightbox-thumb-${i}`}
+          >
+            <img src={resolvePropertyImage(property, i)} alt="" className="w-full h-full object-cover" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 
 function ShareButton({ property }) {

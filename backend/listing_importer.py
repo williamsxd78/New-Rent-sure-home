@@ -302,7 +302,7 @@ def import_listing(url: str = "", html_override: str | None = None) -> Dict[str,
             "images": og_imgs[:6],   # cap to first 6 to keep payload small
             "property_type": _guess_type(desc_l, title),
             "pet_friendly": pet_friendly,
-            "tags": ["Imported", "Verified"],
+            "tags": ["Verified"],
         },
         "notes": _import_notes(rent, bedrooms, bathrooms, og_imgs),
     }
