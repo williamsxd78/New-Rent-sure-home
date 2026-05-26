@@ -21,6 +21,14 @@ fi
 step() { printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 ok()   { printf "\033[1;32m✓ %s\033[0m\n" "$*"; }
 
+# Make sure git trusts the repo even if ownership has been touched (e.g. files
+# pulled by root at some point). Also re-assert ownership in case anything
+# slipped under root after manual fixes.
+step "Ensuring repo ownership & git trust…"
+chown -R "$APP_USER:$APP_USER" "$APP_DIR" || true
+sudo -u "$APP_USER" -H git config --global --add safe.directory "$APP_DIR" >/dev/null 2>&1 || true
+git config --global --add safe.directory "$APP_DIR" >/dev/null 2>&1 || true
+
 step "Pulling latest code…"
 sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git pull --ff-only"
 
