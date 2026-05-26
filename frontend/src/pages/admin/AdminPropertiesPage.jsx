@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { api, formatMoney, resolvePropertyImage } from "@/lib/api";
-import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2, Sparkles } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2, Sparkles, Bookmark, Copy } from "lucide-react";
 
 const BLANK = {
   title: "", property_type: "Apartment", address: "", city: "", state: "", zip_code: "",
@@ -15,13 +15,50 @@ export default function AdminPropertiesPage() {
   const [items, setItems] = useState([]);
   const [editing, setEditing] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [bookmarkletOpen, setBookmarkletOpen] = useState(false);
   const [importNotes, setImportNotes] = useState([]);
+  const [autoImportBusy, setAutoImportBusy] = useState(false);
+  const [autoImportErr, setAutoImportErr] = useState("");
 
   const load = async () => {
     const r = await api.get("/admin/properties");
     setItems(r.data);
   };
   useEffect(() => { load(); }, []);
+
+  // ──────────────────────────────────────────────────────────────────
+  // Bookmarklet auto-import: when the user clicks the bookmarklet on a
+  // listing site, a new tab opens to this page with `window.name` set to
+  // `rs:<base64-json>` containing { url, html }. We decode it, send the HTML
+  // to the importer endpoint, and open the edit modal pre-filled. This
+  // skips the manual paste step entirely.
+  // ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.name || !window.name.startsWith("rs:")) return;
+    let payload;
+    try {
+      const decoded = decodeURIComponent(escape(window.atob(window.name.slice(3))));
+      payload = JSON.parse(decoded);
+    } catch (e) {
+      window.name = "";
+      setAutoImportErr("Bookmarklet payload was malformed. Please try again.");
+      return;
+    }
+    window.name = ""; // consume the payload so refreshing doesn't re-trigger
+    if (!payload?.html) return;
+    setAutoImportBusy(true);
+    setAutoImportErr("");
+    api.post("/admin/properties/import-url", { url: payload.url || "", html: payload.html })
+      .then((r) => {
+        setImportNotes(r.data?.notes || []);
+        setEditing({ ...BLANK, ...(r.data?.prefill || {}) });
+      })
+      .catch((e) => {
+        setAutoImportErr(e?.response?.data?.detail || "Auto-import failed. Try the manual Import button.");
+      })
+      .finally(() => setAutoImportBusy(false));
+  }, []);
 
   const save = async () => {
     const payload = { ...editing };
@@ -54,13 +91,23 @@ export default function AdminPropertiesPage() {
 
   return (
     <div className="p-6 lg:p-10" data-testid="admin-properties">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
         <h1 className="font-display text-3xl font-bold text-[#0A192F]">Properties</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => setBookmarkletOpen(true)} className="rs-btn-outline" data-testid="install-bookmarklet-btn"><Bookmark className="w-4 h-4" /> Install Bookmarklet</button>
           <button onClick={() => setImportOpen(true)} className="rs-btn-outline" data-testid="import-listing-btn"><LinkIcon className="w-4 h-4" /> Import from URL</button>
           <button onClick={() => { setImportNotes([]); setEditing({ ...BLANK }); }} className="rs-btn-primary" data-testid="add-property-btn"><Plus className="w-4 h-4" /> Add Property</button>
         </div>
       </div>
+
+      {autoImportBusy && (
+        <div className="mb-4 p-3 rounded-lg bg-[#0A192F] text-white text-sm flex items-center gap-2" data-testid="auto-import-loading">
+          <Loader2 className="w-4 h-4 animate-spin" /> Importing the page from your bookmarklet…
+        </div>
+      )}
+      {autoImportErr && !autoImportBusy && (
+        <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm" data-testid="auto-import-error">{autoImportErr}</div>
+      )}
 
       <div className="rs-card overflow-hidden">
         <table className="w-full text-sm">
@@ -164,11 +211,97 @@ export default function AdminPropertiesPage() {
           onImported={(prefill, notes) => {
             setImportOpen(false);
             setImportNotes(notes || []);
-            // Merge with BLANK so all required fields exist with sane defaults
             setEditing({ ...BLANK, ...prefill });
           }}
         />
       )}
+      {bookmarkletOpen && <BookmarkletModal onClose={() => setBookmarkletOpen(false)} />}
+    </div>
+  );
+}
+
+function BookmarkletModal({ onClose }) {
+  // Build the bookmarklet JS for THIS site's origin so it always points
+  // to the right admin app even when the user moves to a different domain.
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const target = `${origin}/admin/properties#bm`;
+  const bookmarkletJs = `javascript:(function(){try{var p=JSON.stringify({url:location.href,html:document.documentElement.outerHTML});var n='rs:'+btoa(unescape(encodeURIComponent(p)));window.open('${target}',n);}catch(e){alert('RentSure import failed: '+e.message);}})();`;
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard?.writeText(bookmarkletJs);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#0A192F]/60 flex items-center justify-center p-4" data-testid="bookmarklet-modal">
+      <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="font-display text-xl font-bold text-[#0A192F] flex items-center gap-2">
+            <Bookmark className="w-5 h-5 text-[#C5A880]" /> One-Click Import Bookmarklet
+          </h2>
+          <button onClick={onClose}><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-6 space-y-5">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Drag the button below to your <strong>bookmarks bar</strong>. After that, while viewing any listing on <strong>Zillow / Realtor / Apartments.com / Trulia / Redfin</strong>,
+            just click the bookmarklet — a new tab opens on RentSure and the property auto-imports in ~5 seconds.
+          </p>
+
+          <div className="rounded-xl border-2 border-dashed border-[#C5A880] p-6 bg-amber-50/40 text-center">
+            <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold mb-3">Drag this button → your bookmarks bar</div>
+            <a
+              href={bookmarkletJs}
+              onClick={(e) => e.preventDefault()}
+              draggable="true"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#0A192F] text-white font-semibold cursor-move hover:bg-[#112240] transition-colors"
+              data-testid="bookmarklet-link"
+            >
+              <Sparkles className="w-4 h-4 text-[#C5A880]" /> Import to RentSure
+            </a>
+            <div className="text-[11px] text-slate-500 mt-3">
+              Show bookmarks bar first: <code className="px-1 py-0.5 bg-white border border-slate-200 rounded">Ctrl+Shift+B</code> (Chrome / Edge) or <code className="px-1 py-0.5 bg-white border border-slate-200 rounded">⌘+Shift+B</code> (Mac).
+            </div>
+          </div>
+
+          <details className="rounded-lg border border-slate-200 p-4">
+            <summary className="cursor-pointer text-sm font-semibold text-[#0A192F]">Can't drag? Copy the bookmarklet code</summary>
+            <div className="mt-3 text-xs text-slate-600 leading-relaxed">
+              1. Right-click your bookmarks bar → <strong>Add new bookmark</strong><br />
+              2. Name it <code>Import to RentSure</code><br />
+              3. Paste the code below into the URL field
+            </div>
+            <div className="mt-3 relative">
+              <textarea readOnly className="rs-input font-mono text-[10px] !pr-12" rows={4} value={bookmarkletJs} onClick={(e) => e.target.select()} />
+              <button onClick={copy} className="absolute top-2 right-2 p-1.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700" title="Copy" data-testid="bookmarklet-copy">
+                {copied ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </div>
+          </details>
+
+          <div className="rounded-lg bg-slate-50 border border-slate-200 p-4 text-sm text-slate-700">
+            <div className="font-semibold text-[#0A192F] mb-1.5 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-600" /> How it works</div>
+            <ol className="list-decimal ml-5 space-y-1 text-xs">
+              <li>You install the bookmarklet once (drag the button above).</li>
+              <li>On any listing page, click the bookmarklet from your bookmarks bar.</li>
+              <li>A new tab opens to <code>{origin}/admin/properties</code>.</li>
+              <li>The page HTML is transferred securely via <code>window.name</code> — no servers, no copying.</li>
+              <li>The property edit modal opens auto-filled. You review, fix anything, save.</li>
+            </ol>
+          </div>
+
+          <div className="text-[11px] text-slate-500 leading-relaxed">
+            ⚠️ <strong>Stay signed in:</strong> If you aren't logged into RentSure when you click the bookmarklet, the new tab will redirect to the admin login page. Sign in and click the bookmarklet again on the listing page.
+          </div>
+
+          <div className="flex justify-end">
+            <button onClick={onClose} className="rs-btn-primary">Got it</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
