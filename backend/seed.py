@@ -188,19 +188,51 @@ SAMPLE_REVIEWS = [
 
 
 async def seed_admin(db):
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@rentsurehomes.com")
-    admin_password = os.environ.get("ADMIN_PASSWORD", "Admin@123")
+    # Accept either ADMIN_DEFAULT_EMAIL/PASSWORD (set by deploy.sh) or the older
+    # ADMIN_EMAIL/PASSWORD names. Falls back to the documented preview defaults.
+    admin_email = (
+        os.environ.get("ADMIN_DEFAULT_EMAIL")
+        or os.environ.get("ADMIN_EMAIL")
+        or "admin@rentsurehomes.com"
+    ).strip().lower()
+    admin_password = (
+        os.environ.get("ADMIN_DEFAULT_PASSWORD")
+        or os.environ.get("ADMIN_PASSWORD")
+        or "Admin@123"
+    )
+
+    # If there's already a super_admin in the DB but with a different email
+    # (e.g. the old default `admin@rentsurehomes.com` was seeded on first boot
+    # before .env values were read), rename it to the configured email so the
+    # operator can log in with the credentials they actually set.
+    existing_default = await db.admin_users.find_one({"email": "admin@rentsurehomes.com"})
+    if existing_default and admin_email != "admin@rentsurehomes.com":
+        await db.admin_users.update_one(
+            {"id": existing_default["id"]},
+            {"$set": {
+                "email": admin_email,
+                "password_hash": hash_password(admin_password),
+                "active": True,
+            }},
+        )
+        return
+
     existing = await db.admin_users.find_one({"email": admin_email})
     if not existing:
-        await db.admin_users.insert_one({
-            "id": str(uuid.uuid4()),
-            "email": admin_email,
-            "name": "Super Admin",
-            "role": "super_admin",
-            "password_hash": hash_password(admin_password),
-            "active": True,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        try:
+            await db.admin_users.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": admin_email,
+                "name": "Super Admin",
+                "role": "super_admin",
+                "password_hash": hash_password(admin_password),
+                "active": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            # Race with a sibling worker — another worker already inserted the
+            # same admin. Safe to ignore; we just need the row to exist.
+            pass
     else:
         # Back-fill `active` on existing seed (idempotent)
         if "active" not in existing:
