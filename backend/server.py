@@ -1139,6 +1139,27 @@ async def admin_create_property(p: PropertyIn, admin=Depends(require_admin)):
     return doc
 
 
+@api.post("/admin/properties/import-url")
+async def admin_import_listing(payload: dict, admin=Depends(require_admin)):
+    """Fetches a public listing URL (Zillow, Realtor, Apartments.com, etc.)
+    OR parses a pasted page source — and returns a property-shaped prefill
+    dict. Does NOT save anything — the admin reviews + clicks Save."""
+    from listing_importer import import_listing
+    url = (payload.get("url") or "").strip()
+    html = payload.get("html")
+    if isinstance(html, str):
+        html = html.strip() or None
+    try:
+        return await asyncio.to_thread(import_listing, url, html)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    except Exception as e:
+        logger.exception("Listing import failed")
+        raise HTTPException(500, f"Import failed: {e}")
+
+
 @api.put("/admin/properties/{pid}")
 async def admin_update_property(pid: str, p: PropertyIn, admin=Depends(require_admin)):
     existing = await db.properties.find_one({"id": pid}, {"_id": 0})

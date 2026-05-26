@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { api, formatMoney, resolvePropertyImage } from "@/lib/api";
-import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2, Sparkles } from "lucide-react";
 
 const BLANK = {
   title: "", property_type: "Apartment", address: "", city: "", state: "", zip_code: "",
@@ -14,6 +14,8 @@ const BLANK = {
 export default function AdminPropertiesPage() {
   const [items, setItems] = useState([]);
   const [editing, setEditing] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importNotes, setImportNotes] = useState([]);
 
   const load = async () => {
     const r = await api.get("/admin/properties");
@@ -54,7 +56,10 @@ export default function AdminPropertiesPage() {
     <div className="p-6 lg:p-10" data-testid="admin-properties">
       <div className="flex items-center justify-between mb-8">
         <h1 className="font-display text-3xl font-bold text-[#0A192F]">Properties</h1>
-        <button onClick={() => setEditing({ ...BLANK })} className="rs-btn-primary" data-testid="add-property-btn"><Plus className="w-4 h-4" /> Add Property</button>
+        <div className="flex gap-2">
+          <button onClick={() => setImportOpen(true)} className="rs-btn-outline" data-testid="import-listing-btn"><LinkIcon className="w-4 h-4" /> Import from URL</button>
+          <button onClick={() => { setImportNotes([]); setEditing({ ...BLANK }); }} className="rs-btn-primary" data-testid="add-property-btn"><Plus className="w-4 h-4" /> Add Property</button>
+        </div>
       </div>
 
       <div className="rs-card overflow-hidden">
@@ -88,8 +93,16 @@ export default function AdminPropertiesPage() {
           <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white">
               <h2 className="font-display text-xl font-bold text-[#0A192F]">{editing.id ? "Edit Property" : "New Property"}</h2>
-              <button onClick={() => setEditing(null)}><X className="w-5 h-5" /></button>
+              <button onClick={() => { setEditing(null); setImportNotes([]); }}><X className="w-5 h-5" /></button>
             </div>
+            {importNotes.length > 0 && (
+              <div className="mx-6 mt-5 p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm" data-testid="import-notes">
+                <div className="font-semibold flex items-center gap-1.5 mb-1"><Sparkles className="w-4 h-4" /> Imported — please review</div>
+                <ul className="list-disc ml-5 space-y-0.5">
+                  {importNotes.map((n, i) => <li key={i}>{n}</li>)}
+                </ul>
+              </div>
+            )}
             <div className="p-6 grid sm:grid-cols-2 gap-4">
               {[
                 ["title", "Title"], ["property_type", "Type", ["Apartment","House","Studio","Condo"]],
@@ -145,10 +158,145 @@ export default function AdminPropertiesPage() {
           </div>
         </div>
       )}
+      {importOpen && (
+        <ImportFromUrlModal
+          onClose={() => setImportOpen(false)}
+          onImported={(prefill, notes) => {
+            setImportOpen(false);
+            setImportNotes(notes || []);
+            // Merge with BLANK so all required fields exist with sane defaults
+            setEditing({ ...BLANK, ...prefill });
+          }}
+        />
+      )}
     </div>
   );
 }
 
+function ImportFromUrlModal({ onClose, onImported }) {
+  const [mode, setMode] = useState("url"); // "url" or "paste"
+  const [url, setUrl] = useState("");
+  const [html, setHtml] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async (e) => {
+    e?.preventDefault();
+    setErr("");
+    if (mode === "url" && !/^https?:\/\//i.test(url.trim())) {
+      setErr("Paste a full URL starting with https://");
+      return;
+    }
+    if (mode === "paste" && html.trim().length < 200) {
+      setErr("Pasted content looks too short to be a real page source. Open the listing → right-click → View page source → Select All → Copy → paste here.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const body = mode === "paste"
+        ? { url: url.trim() || undefined, html }
+        : { url: url.trim() };
+      const r = await api.post("/admin/properties/import-url", body);
+      onImported(r.data?.prefill || {}, r.data?.notes || []);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || "Import failed. The site may be blocking automated requests — try the 'Paste page source' tab.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-[#0A192F]/60 flex items-center justify-center p-4" data-testid="import-modal">
+      <div className="bg-white rounded-2xl max-w-lg w-full">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+          <h2 className="font-display text-xl font-bold text-[#0A192F] flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-[#C5A880]" /> Import from Listing
+          </h2>
+          <button onClick={onClose}><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={submit} className="p-6">
+          <p className="text-sm text-slate-600 leading-relaxed mb-4">
+            We'll pre-fill the property form from <strong>Zillow</strong>, <strong>Realtor.com</strong>, <strong>Apartments.com</strong>, <strong>Trulia</strong>, <strong>Redfin</strong> or any other listing site. You review and save.
+          </p>
+
+          <div className="flex gap-1 border-b border-slate-200 mb-4">
+            <button type="button" onClick={() => setMode("url")} className={`px-3 py-2 text-sm font-medium border-b-2 transition ${mode === "url" ? "border-[#C5A880] text-[#0A192F]" : "border-transparent text-slate-500 hover:text-[#0A192F]"}`} data-testid="import-tab-url">
+              <LinkIcon className="w-3.5 h-3.5 inline mr-1" /> Fetch by URL
+            </button>
+            <button type="button" onClick={() => setMode("paste")} className={`px-3 py-2 text-sm font-medium border-b-2 transition ${mode === "paste" ? "border-[#C5A880] text-[#0A192F]" : "border-transparent text-slate-500 hover:text-[#0A192F]"}`} data-testid="import-tab-paste">
+              <Sparkles className="w-3.5 h-3.5 inline mr-1" /> Paste page source
+            </button>
+          </div>
+
+          {mode === "url" ? (
+            <>
+              <label className="rs-label">Listing URL</label>
+              <div className="relative">
+                <LinkIcon className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="url"
+                  className="rs-input !pl-10"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://www.zillow.com/homedetails/…"
+                  autoFocus
+                  data-testid="import-url-input"
+                />
+              </div>
+              <div className="mt-2 text-[11px] text-slate-500 leading-relaxed">
+                Many sites (Zillow, Realtor, Trulia) block automated fetches. If you see a fetch error, switch to <strong>Paste page source</strong>.
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="rs-label">Original URL <span className="text-slate-400 font-normal">(optional)</span></label>
+              <input
+                type="url"
+                className="rs-input !pl-3 mb-3"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://www.zillow.com/…"
+                data-testid="import-url-paste"
+              />
+              <label className="rs-label">Page Source HTML</label>
+              <textarea
+                rows={8}
+                className="rs-input font-mono text-xs"
+                value={html}
+                onChange={(e) => setHtml(e.target.value)}
+                placeholder="Open the listing in your browser → right-click → 'View Page Source' → Ctrl+A → Ctrl+C → paste here"
+                data-testid="import-html-input"
+              />
+              <div className="mt-2 text-[11px] text-slate-500 leading-relaxed">
+                <strong>How to copy:</strong> open the listing → <code className="px-1 py-0.5 bg-slate-100 rounded">Ctrl+U</code> (View Source) → <code className="px-1 py-0.5 bg-slate-100 rounded">Ctrl+A</code> (Select All) → <code className="px-1 py-0.5 bg-slate-100 rounded">Ctrl+C</code> (Copy) → paste here.
+              </div>
+            </>
+          )}
+
+          {err && (
+            <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm flex items-start gap-2" data-testid="import-error">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>{err}</div>
+            </div>
+          )}
+
+          <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
+            <div className="font-semibold text-[#0A192F] mb-1 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> What gets imported</div>
+            Title · address · city · state · zip · rent · bedrooms · bathrooms · square feet · cover image(s) · description.
+            <div className="mt-1.5 text-slate-500">All fields are editable before saving. Missing fields are flagged for manual entry.</div>
+          </div>
+
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="rs-btn-outline">Cancel</button>
+            <button type="submit" disabled={busy || (mode === "url" ? !url.trim() : !html.trim())} className="rs-btn-primary disabled:opacity-60" data-testid="import-submit">
+              {busy ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</> : <>Import</>}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 function PropertyImageManager({ property, onChange }) {
   const [busy, setBusy] = useState(false);
