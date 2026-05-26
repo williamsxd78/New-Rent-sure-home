@@ -12,8 +12,11 @@ export default function PropertiesPage() {
     property_type: "all", pet_friendly: false, sort: "newest",
   });
 
+  const [error, setError] = useState("");
+
   const fetchData = async () => {
     setLoading(true);
+    setError("");
     const params = {};
     if (filters.city) params.city = filters.city;
     if (filters.min_rent) params.min_rent = filters.min_rent;
@@ -23,9 +26,18 @@ export default function PropertiesPage() {
     if (filters.property_type !== "all") params.property_type = filters.property_type;
     if (filters.pet_friendly) params.pet_friendly = true;
     params.sort = filters.sort;
-    const r = await api.get("/properties", { params });
-    setItems(r.data);
-    setLoading(false);
+    try {
+      const r = await api.get("/properties", { params });
+      setItems(Array.isArray(r.data) ? r.data : []);
+    } catch (e) {
+      const msg = e?.response?.data?.detail
+        || e?.message
+        || "Could not load properties. Please try again.";
+      setError(msg);
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
@@ -82,10 +94,17 @@ export default function PropertiesPage() {
 
       <section className="rs-container pb-20" data-testid="properties-results">
         <div className="text-sm text-slate-500 mb-5">{loading ? "Loading…" : `${items.length} properties found`}</div>
+        {error && !loading && (
+          <div className="rs-card p-6 mb-5 border-red-200 bg-red-50 text-red-800" data-testid="properties-error">
+            <div className="font-semibold">Couldn't load properties</div>
+            <div className="text-sm mt-1">{error}</div>
+            <button onClick={fetchData} className="rs-btn-outline mt-3 !py-2">Retry</button>
+          </div>
+        )}
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {items.map((p) => <PropertyCard key={p.id} p={p} />)}
         </div>
-        {!loading && items.length === 0 && (
+        {!loading && !error && items.length === 0 && (
           <div className="rs-card p-12 text-center text-slate-500" data-testid="properties-empty">
             No properties match your filters. Try widening your search.
           </div>
