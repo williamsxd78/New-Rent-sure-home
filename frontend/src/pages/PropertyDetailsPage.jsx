@@ -167,8 +167,8 @@ const Row = ({ label, value, icon: Icon }) => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Premium image gallery — Zillow/Airbnb-style hero + 4 thumb grid
-// Layout never breaks regardless of image count (1, 5, or 50).
+// Premium image gallery — Realtor/Apartments.com-style 2-image hero.
+// Layout never breaks regardless of image count (1, 2, or 50).
 // ─────────────────────────────────────────────────────────────────────────────
 function PropertyGallery({ property, onOpen }) {
   const images = property.images || [];
@@ -182,40 +182,33 @@ function PropertyGallery({ property, onOpen }) {
     );
   }
 
-  // 1-image: simple hero only
+  // 1-image: hero only, full width
   if (n === 1) {
     return (
-      <div className="mt-6 aspect-[16/9] rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative" data-testid="property-gallery">
-        <img src={resolvePropertyImage(property, 0)} alt={property.title} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500" onClick={() => onOpen(0)} />
+      <div className="mt-6 aspect-[16/9] rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group" data-testid="property-gallery">
+        <img
+          src={resolvePropertyImage(property, 0)}
+          alt={property.title}
+          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
+          onClick={() => onOpen(0)}
+        />
       </div>
     );
   }
 
-  // 2-image: side by side
-  if (n === 2) {
-    return (
-      <div className="mt-6 grid grid-cols-2 gap-2 sm:gap-3 h-[280px] sm:h-[420px] lg:h-[480px]" data-testid="property-gallery">
-        {[0, 1].map((i) => (
-          <button key={i} onClick={() => onOpen(i)} className="rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group">
-            <img src={resolvePropertyImage(property, i)} alt={`${property.title} photo ${i + 1}`} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500" />
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  // 3+ images: hero (left) + 2×2 thumbnail grid (right) — fixed-height row
-  // so it never overflows even with 50 images.
-  const extra = Math.max(0, n - 5);
+  // 2+ images: big hero (60%) + big secondary (40%) side by side.
+  // When n > 2, the secondary image gets a "+N photos" overlay so users
+  // know there are more. Click either → opens the lightbox.
+  const extra = Math.max(0, n - 2);
   return (
     <div
-      className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-2 sm:gap-3 h-auto lg:h-[480px]"
+      className="mt-6 grid grid-cols-1 lg:grid-cols-5 gap-3 h-auto lg:h-[520px]"
       data-testid="property-gallery"
     >
-      {/* Hero */}
+      {/* Hero — 3/5 of the row (60%) on desktop */}
       <button
         onClick={() => onOpen(0)}
-        className="aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative"
+        className="lg:col-span-3 aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group"
         data-testid="gallery-hero"
       >
         <img
@@ -225,35 +218,28 @@ function PropertyGallery({ property, onOpen }) {
         />
       </button>
 
-      {/* 2x2 thumb grid */}
-      <div className="grid grid-cols-2 grid-rows-2 gap-2 sm:gap-3 h-[200px] sm:h-[320px] lg:h-full">
-        {[1, 2, 3, 4].map((i) => {
-          if (i >= n) {
-            return <div key={i} className="rounded-2xl bg-slate-50 border border-slate-100" />;
-          }
-          const isLastVisible = i === 4 && extra > 0;
-          return (
-            <button
-              key={i}
-              onClick={() => onOpen(i)}
-              className="rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative"
-              data-testid={`gallery-thumb-${i}`}
-            >
-              <img
-                src={resolvePropertyImage(property, i)}
-                alt={`${property.title} photo ${i + 1}`}
-                className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
-              />
-              {isLastVisible && (
-                <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white" data-testid="gallery-more-overlay">
-                  <Grid3x3 className="w-6 h-6 mb-1" />
-                  <div className="font-display font-semibold">+{extra} photos</div>
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {/* Secondary — 2/5 (40%) — full height */}
+      <button
+        onClick={() => onOpen(1)}
+        className="lg:col-span-2 aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative"
+        data-testid="gallery-thumb-1"
+      >
+        <img
+          src={resolvePropertyImage(property, 1)}
+          alt={`${property.title} photo 2`}
+          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
+        />
+        {extra > 0 && (
+          <div
+            className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center text-white pointer-events-none"
+            data-testid="gallery-more-overlay"
+          >
+            <Grid3x3 className="w-7 h-7 mb-1.5" />
+            <div className="font-display font-semibold text-lg">+{extra} photos</div>
+            <div className="text-xs uppercase tracking-wider opacity-70 mt-0.5">Tap to view all</div>
+          </div>
+        )}
+      </button>
     </div>
   );
 }
