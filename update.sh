@@ -30,6 +30,15 @@ sudo -u "$APP_USER" -H git config --global --add safe.directory "$APP_DIR" >/dev
 git config --global --add safe.directory "$APP_DIR" >/dev/null 2>&1 || true
 
 step "Pulling latest code…"
+# Auto-stash any local working-tree changes so the pull never fails on
+# operator-edited config files (line-endings, permissions, manual tweaks).
+# The stash entry stays around and can be restored with `git stash pop`.
+if sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git diff --quiet && git diff --cached --quiet"; then
+  ok "Working tree clean"
+else
+  step "Local edits detected — auto-stashing them safely…"
+  sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git stash push -u -m 'auto-stash-$(date +%F-%H%M)' || true"
+fi
 sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git pull --ff-only"
 
 step "Installing/updating backend deps…"
