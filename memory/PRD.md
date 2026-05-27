@@ -58,6 +58,9 @@ Create a professional, premium, trust-focused rental property application and te
   - Mobile-first responsive layout, navy + gold palette, no AI-slop styling
 
 ## Implemented (May 2026 — session 6)
+- ✅ **Auto-localize on import** — `POST /admin/properties/import-url` now downloads every scraped image to local storage *at import time* (instead of waiting for the next Save). Storage refs use a temp UUID so the path is independent of the final property id; eventual Save is a no-op for already-localized refs. Surfaces a clear note ("Saved N images to local storage…") and reports any URLs that were unreachable.
+- ✅ **Content-keyed cache busting** for `storage://` proxy URLs (`?v=<hash-of-file>`) — fixes the bug where deleting/reordering images served stale cached versions because the index URL never changed. Applied in both admin manager and shared `resolvePropertyImage()`.
+- ✅ **Explicit "Set as Cover" star button** on every non-cover image (one-click promote to index 0) + visible "Hover to set cover, reorder, or delete" hint above the gallery.
 - ✅ **Unified admin image manager** — single `PropertyImagesSection` component replaces the broken `PropertyImagesSection` reference + isolated `PropertyImageManager`. Handles file upload, comma/newline-separated URL bulk paste, delete, and reorder for both `storage://` refs and external URLs in one UI. Cover badge follows index 0; URL badge on external images. Works both pre-save (local state) and post-save (calls API). Surfaces a warning when backend can't download some pasted URLs.
 
 ## Implemented (Feb 2026 — session 4)

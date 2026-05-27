@@ -1216,14 +1216,16 @@ async def admin_create_property(p: PropertyIn, admin=Depends(require_admin)):
 async def admin_import_listing(payload: dict, admin=Depends(require_admin)):
     """Fetches a public listing URL (Zillow, Realtor, Apartments.com, etc.)
     OR parses a pasted page source — and returns a property-shaped prefill
-    dict. Does NOT save anything — the admin reviews + clicks Save."""
+    dict. Does NOT save the property yet — but DOES proactively download the
+    scraped images into our own storage so they stay alive even when the
+    source site rotates its CDN URLs."""
     from listing_importer import import_listing
     url = (payload.get("url") or "").strip()
     html = payload.get("html")
     if isinstance(html, str):
         html = html.strip() or None
     try:
-        return await asyncio.to_thread(import_listing, url, html)
+        result = await asyncio.to_thread(import_listing, url, html)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except RuntimeError as e:
@@ -1231,6 +1233,27 @@ async def admin_import_listing(payload: dict, admin=Depends(require_admin)):
     except Exception as e:
         logger.exception("Listing import failed")
         raise HTTPException(500, f"Import failed: {e}")
+
+    # ── Localize images NOW so listings stay safe from CDN rotation ──
+    # The storage path doesn't depend on the final property id (each file
+    # gets its own UUID inside the path), so we use a temporary one here.
+    prefill = result.get("prefill") or {}
+    src_imgs = prefill.get("images") or []
+    if src_imgs:
+        temp_id = str(uuid.uuid4())
+        localized = await _localize_external_images(temp_id, src_imgs)
+        prefill["images"] = localized
+        # Surface the result in the import notes so the admin sees what happened.
+        saved = sum(1 for i in localized if isinstance(i, str) and i.startswith("storage://"))
+        skipped = len(src_imgs) - saved
+        notes = list(result.get("notes") or [])
+        if saved:
+            notes.append(f"Saved {saved} image{'s' if saved != 1 else ''} to local storage — they will keep working even if the source CDN expires.")
+        if skipped:
+            notes.append(f"{skipped} image{'s were' if skipped != 1 else ' was'} unreachable and skipped (the source site may be blocking downloads).")
+        result["notes"] = notes
+    result["prefill"] = prefill
+    return result
 
 
 @api.put("/admin/properties/{pid}")
