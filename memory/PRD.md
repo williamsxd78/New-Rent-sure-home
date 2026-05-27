@@ -57,6 +57,9 @@ Create a professional, premium, trust-focused rental property application and te
   - Sidebar: Messages center (latest admin message + unread count), Applicant Contact (email + phone only, sensitive info hidden), Confirmation & Receipt (PDF download + refund policy link)
   - Mobile-first responsive layout, navy + gold palette, no AI-slop styling
 
+## Implemented (May 2026 — session 6)
+- ✅ **Unified admin image manager** — single `PropertyImagesSection` component replaces the broken `PropertyImagesSection` reference + isolated `PropertyImageManager`. Handles file upload, comma/newline-separated URL bulk paste, delete, and reorder for both `storage://` refs and external URLs in one UI. Cover badge follows index 0; URL badge on external images. Works both pre-save (local state) and post-save (calls API). Surfaces a warning when backend can't download some pasted URLs.
+
 ## Implemented (Feb 2026 — session 4)
 - ✅ **Apply-page step persistence** — refresh on any step keeps the user on the same step (localStorage `rs_apply_step_<pid>`) + `appResult` persisted so payment/success steps survive reload. Safety fallback: refreshing on success step without an active result drops back to Review.
 - ✅ **Slug-based property URLs** — every property auto-gets a slug like `south-end-loft-boston`. `/properties/<slug>` resolves the same as `/properties/<id>` (back-compat). Slug only regenerates on title/city change.

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import { api, formatMoney, resolvePropertyImage } from "@/lib/api";
+import { api, API, formatMoney } from "@/lib/api";
 import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2, Sparkles, Bookmark, Copy } from "lucide-react";
 
 const BLANK = {
@@ -177,7 +177,10 @@ export default function AdminPropertiesPage() {
 
               {/* Images section — unified manager. Works pre-save (just edits local state) and post-save (calls the upload/delete endpoints). */}
               <div className="sm:col-span-2">
-                <PropertyImagesSection editing={editing} setEditing={setEditing} />
+                <PropertyImagesSection
+                  editing={editing}
+                  onImagesChange={(imgs) => setEditing((cur) => ({ ...cur, images: imgs }))}
+                />
               </div>
 
               <div className="sm:col-span-2"><label className="rs-label">Required Documents (one per line)</label><textarea rows={4} className="rs-input" value={Array.isArray(editing.required_documents) ? editing.required_documents.join("\n") : editing.required_documents} onChange={(e) => setEditing({ ...editing, required_documents: e.target.value })} /></div>
@@ -419,25 +422,59 @@ function ImportFromUrlModal({ onClose, onImported }) {
   );
 }
 
-function PropertyImageManager({ property, onChange }) {
+/**
+ * PropertyImagesSection — unified image manager for the admin property modal.
+ *
+ * Handles ALL image types in one UI:
+ *  - storage://… refs (locally uploaded files, streamed via /api proxy)
+ *  - https://… external URLs (Zillow, Realtor, manual paste)
+ *
+ * Two modes:
+ *  - PRE-SAVE (no property id yet): just mutates local `editing.images` state.
+ *    File upload is disabled; URL bulk-add and remove/reorder are available.
+ *  - POST-SAVE: file upload + URL add + delete + reorder all hit the backend
+ *    endpoints; local state mirrors the server response.
+ *
+ * The single source of truth is `editing.images`. After every mutation we call
+ * `onImagesChange(newImages)` so the parent form stays in sync, and the next
+ * Save will PUT the same array back (no drift).
+ */
+function PropertyImagesSection({ editing, onImagesChange }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
   const inputRef = useRef(null);
-  const images = property.images || [];
 
+  const propertyId = editing?.id || null;
+  const images = Array.isArray(editing?.images) ? editing.images : [];
+
+  // Resolve an image ref (string) into a viewable URL for the <img> tag.
+  const refToSrc = (ref, idx) => {
+    if (!ref) return "";
+    if (typeof ref !== "string") return "";
+    if (ref.startsWith("storage://")) {
+      // Streamed through our proxy — needs the property id, which we have here.
+      return `${API}/properties/${editing.slug || propertyId}/images/${idx}`;
+    }
+    return ref; // external https/http URL
+  };
+
+  // ─── File upload (post-save only) ────────────────────────────────────
   const uploadFile = async (file) => {
     setErr("");
+    if (!propertyId) { setErr("Save the property first, then upload files."); return; }
     if (!file.type.startsWith("image/")) { setErr("Only image files (JPG/PNG/WEBP) are allowed"); return; }
     if (file.size > 8 * 1024 * 1024) { setErr("Max 8MB per image"); return; }
     setBusy(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      await api.post(`/admin/properties/${property.id}/images`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      await api.post(`/admin/properties/${propertyId}/images`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+      // Re-fetch this property so we get the canonical updated images array.
       const r = await api.get(`/admin/properties`);
-      const fresh = r.data.find((p) => p.id === property.id);
-      if (fresh) onChange(fresh.images || []);
+      const fresh = r.data.find((p) => p.id === propertyId);
+      if (fresh) onImagesChange(fresh.images || []);
     } catch (e) {
       setErr(e?.response?.data?.detail || "Upload failed");
     } finally { setBusy(false); }
@@ -450,44 +487,140 @@ function PropertyImageManager({ property, onChange }) {
     }
   };
 
-  const removeAt = async (idx) => {
-    if (!window.confirm("Delete this image?")) return;
-    try {
-      const r = await api.delete(`/admin/properties/${property.id}/images/${idx}`);
-      onChange(r.data.images || []);
-    } catch (e) { setErr(e?.response?.data?.detail || "Delete failed"); }
+  // ─── Bulk add URLs (comma OR newline separated) ──────────────────────
+  // Accepts any mix of commas, newlines, semicolons, or whitespace as
+  // separators so admins can paste from a spreadsheet, a list, etc.
+  const parseUrls = (raw) =>
+    (raw || "")
+      .split(/[\s,;\n\r]+/)
+      .map((s) => s.trim())
+      .filter((s) => /^https?:\/\//i.test(s));
+
+  const addUrls = async () => {
+    setErr("");
+    const urls = parseUrls(urlInput);
+    if (urls.length === 0) {
+      setErr("Paste one or more image URLs (https://…). Separate multiple with commas or new lines.");
+      return;
+    }
+    const next = [...images, ...urls];
+    if (propertyId) {
+      setBusy(true);
+      try {
+        const r = await api.put(`/admin/properties/${propertyId}`, { ...editing, images: next });
+        const saved = r.data?.images || next;
+        onImagesChange(saved);
+        setUrlInput("");
+        // Backend silently drops URLs it couldn't download (CDN blocks etc.).
+        // Surface that so the admin knows to use a different URL.
+        const dropped = next.length - saved.length;
+        if (dropped > 0) {
+          setErr(`${dropped} URL${dropped === 1 ? " was" : "s were"} unreachable and skipped. Try downloading the image and uploading the file instead.`);
+        }
+      } catch (e) {
+        setErr(e?.response?.data?.detail || "Failed to save image URLs");
+      } finally { setBusy(false); }
+    } else {
+      // Pre-save: just stage them locally; Save will persist on first POST.
+      onImagesChange(next);
+      setUrlInput("");
+    }
   };
 
+  // ─── Remove (works for BOTH storage:// and external URLs) ────────────
+  const removeAt = async (idx) => {
+    if (!window.confirm("Delete this image?")) return;
+    setErr("");
+    if (propertyId) {
+      try {
+        const r = await api.delete(`/admin/properties/${propertyId}/images/${idx}`);
+        onImagesChange(r.data.images || []);
+      } catch (e) { setErr(e?.response?.data?.detail || "Delete failed"); }
+    } else {
+      const next = images.filter((_, i) => i !== idx);
+      onImagesChange(next);
+    }
+  };
+
+  // ─── Reorder (move up/down) ──────────────────────────────────────────
   const reorder = async (idx, delta) => {
     const newIdx = idx + delta;
     if (newIdx < 0 || newIdx >= images.length) return;
     const order = images.map((_, i) => i);
     [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
-    try {
-      const r = await api.patch(`/admin/properties/${property.id}/images/reorder`, { order });
-      onChange(r.data.images || []);
-    } catch (e) { setErr(e?.response?.data?.detail || "Reorder failed"); }
+    const next = order.map((i) => images[i]);
+    if (propertyId) {
+      try {
+        const r = await api.patch(`/admin/properties/${propertyId}/images/reorder`, { order });
+        onImagesChange(r.data.images || next);
+      } catch (e) { setErr(e?.response?.data?.detail || "Reorder failed"); }
+    } else {
+      onImagesChange(next);
+    }
   };
 
   return (
     <div data-testid="property-image-manager">
+      <label className="rs-label">Images</label>
+
+      {/* Bulk URL add — works pre-save AND post-save */}
+      <div className="rounded-xl border border-slate-200 p-4 bg-white">
+        <div className="text-xs font-semibold text-[#0A192F] mb-2 flex items-center gap-1.5">
+          <LinkIcon className="w-3.5 h-3.5 text-[#C5A880]" /> Add image URLs
+        </div>
+        <textarea
+          rows={2}
+          className="rs-input font-mono text-xs"
+          value={urlInput}
+          onChange={(e) => setUrlInput(e.target.value)}
+          placeholder="https://example.com/photo1.jpg, https://example.com/photo2.jpg"
+          data-testid="image-urls-input"
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <div className="text-[11px] text-slate-500">
+            Paste one or more URLs. Separate with <strong>commas</strong> or <strong>new lines</strong>.
+          </div>
+          <button
+            type="button"
+            onClick={addUrls}
+            disabled={busy || !urlInput.trim()}
+            className="rs-btn-outline !py-1.5 !px-3 !text-xs disabled:opacity-50"
+            data-testid="add-image-urls-btn"
+          >
+            {busy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Adding…</> : <><Plus className="w-3.5 h-3.5" /> Add URLs</>}
+          </button>
+        </div>
+      </div>
+
+      {/* File upload — only after the property is saved */}
       <div
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => { e.preventDefault(); if (propertyId) setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => { e.preventDefault(); setDragOver(false); onFiles(e.dataTransfer.files); }}
-        className={`rounded-xl border-2 border-dashed p-6 text-center transition cursor-pointer ${dragOver ? "border-[#C5A880] bg-[#C5A880]/5" : "border-slate-300 hover:border-[#0A192F] bg-slate-50/50"}`}
-        onClick={() => inputRef.current?.click()}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); if (propertyId) onFiles(e.dataTransfer.files); }}
+        className={`mt-3 rounded-xl border-2 border-dashed p-5 text-center transition ${
+          !propertyId
+            ? "border-slate-200 bg-slate-50 cursor-not-allowed opacity-70"
+            : `cursor-pointer ${dragOver ? "border-[#C5A880] bg-[#C5A880]/5" : "border-slate-300 hover:border-[#0A192F] bg-slate-50/50"}`
+        }`}
+        onClick={() => propertyId && inputRef.current?.click()}
         data-testid="image-dropzone"
+        title={propertyId ? "" : "Save the property first to enable file uploads"}
       >
-        {busy ? (
+        {busy && propertyId ? (
           <div className="flex items-center justify-center gap-2 text-slate-500 text-sm">
             <Loader2 className="w-4 h-4 animate-spin" /> Uploading…
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 text-slate-500">
-            <ImagePlus className="w-7 h-7 text-[#C5A880]" />
-            <div className="text-sm"><strong className="text-[#0A192F]">Drop images</strong> or click to browse</div>
-            <div className="text-xs text-slate-400">JPG, PNG, WEBP · up to 8 MB each</div>
+          <div className="flex flex-col items-center gap-1.5 text-slate-500">
+            <ImagePlus className="w-6 h-6 text-[#C5A880]" />
+            <div className="text-sm">
+              {propertyId ? (
+                <><strong className="text-[#0A192F]">Drop images</strong> or click to upload from your computer</>
+              ) : (
+                <span className="text-slate-400">Save the property to enable file uploads</span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-400">JPG, PNG, WEBP · up to 8 MB each</div>
           </div>
         )}
         <input
@@ -500,23 +633,30 @@ function PropertyImageManager({ property, onChange }) {
           data-testid="image-file-input"
         />
       </div>
+
       {err && <div className="mt-2 text-xs text-red-600" data-testid="image-error">{err}</div>}
+
+      {/* Gallery — every image gets delete + reorder, regardless of source */}
       {images.length > 0 && (
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="property-images-grid">
           {images.map((ref, i) => (
-            <div key={`${ref}-${i}`} className="relative group rs-card overflow-hidden" data-testid={`property-image-${i}`}>
+            <div key={`${typeof ref === "string" ? ref : "img"}-${i}`} className="relative group rs-card overflow-hidden" data-testid={`property-image-${i}`}>
               <div className="aspect-[4/3] bg-slate-100">
                 <img
-                  src={resolvePropertyImage(property, i)}
+                  src={refToSrc(ref, i)}
                   alt={`Property ${i + 1}`}
                   className="w-full h-full object-cover"
+                  onError={(e) => { e.currentTarget.style.opacity = "0.25"; }}
                 />
               </div>
               {i === 0 && <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-[#C5A880] text-white text-[10px] uppercase tracking-wider font-semibold">Cover</span>}
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
-                <button onClick={(e) => { e.stopPropagation(); reorder(i, -1); }} disabled={i === 0} title="Move up" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-up-${i}`}><ChevronUp className="w-4 h-4" /></button>
-                <button onClick={(e) => { e.stopPropagation(); reorder(i, 1); }} disabled={i === images.length - 1} title="Move down" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-down-${i}`}><ChevronDown className="w-4 h-4" /></button>
-                <button onClick={(e) => { e.stopPropagation(); removeAt(i); }} title="Delete" className="p-1.5 rounded bg-white/90 text-red-600" data-testid={`img-del-${i}`}><Trash2 className="w-4 h-4" /></button>
+              {typeof ref === "string" && ref.startsWith("http") && (
+                <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] uppercase tracking-wider">URL</span>
+              )}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                <button type="button" onClick={(e) => { e.stopPropagation(); reorder(i, -1); }} disabled={i === 0} title="Move up" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-up-${i}`}><ChevronUp className="w-4 h-4" /></button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); reorder(i, 1); }} disabled={i === images.length - 1} title="Move down" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-down-${i}`}><ChevronDown className="w-4 h-4" /></button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); removeAt(i); }} title="Delete" className="p-1.5 rounded bg-white/90 text-red-600" data-testid={`img-del-${i}`}><Trash2 className="w-4 h-4" /></button>
               </div>
             </div>
           ))}
