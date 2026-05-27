@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { api, API, formatMoney } from "@/lib/api";
-import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2, Sparkles, Bookmark, Copy } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Upload, ImagePlus, ChevronUp, ChevronDown, Loader2, Link as LinkIcon, AlertCircle, CheckCircle2, Sparkles, Bookmark, Copy, Star } from "lucide-react";
 
 const BLANK = {
   title: "", property_type: "Apartment", address: "", city: "", state: "", zip_code: "",
@@ -450,12 +450,18 @@ function PropertyImagesSection({ editing, onImagesChange }) {
   const images = Array.isArray(editing?.images) ? editing.images : [];
 
   // Resolve an image ref (string) into a viewable URL for the <img> tag.
+  // For storage:// refs, append a short hash of the ref so the browser cache
+  // is keyed to the underlying file, not just the index. Without this, after
+  // a delete/reorder the URL /images/0 stays the same and the browser serves
+  // the OLD cover image from cache even though the data shifted.
   const refToSrc = (ref, idx) => {
     if (!ref) return "";
     if (typeof ref !== "string") return "";
     if (ref.startsWith("storage://")) {
-      // Streamed through our proxy — needs the property id, which we have here.
-      return `${API}/properties/${editing.slug || propertyId}/images/${idx}`;
+      // last segment of the storage path uniquely identifies the file
+      const tail = ref.split("/").pop() || "";
+      const cacheKey = tail.slice(0, 16) || String(idx);
+      return `${API}/properties/${editing.slug || propertyId}/images/${idx}?v=${encodeURIComponent(cacheKey)}`;
     }
     return ref; // external https/http URL
   };
@@ -559,6 +565,24 @@ function PropertyImagesSection({ editing, onImagesChange }) {
     }
   };
 
+  // ─── Promote an image to Cover (index 0) ─────────────────────────────
+  // Equivalent to dragging the image to the first slot. Other images shift
+  // down by one, preserving their relative order.
+  const setCover = async (idx) => {
+    if (idx === 0 || idx >= images.length) return;
+    const order = [idx, ...images.map((_, i) => i).filter((i) => i !== idx)];
+    const next = order.map((i) => images[i]);
+    setErr("");
+    if (propertyId) {
+      try {
+        const r = await api.patch(`/admin/properties/${propertyId}/images/reorder`, { order });
+        onImagesChange(r.data.images || next);
+      } catch (e) { setErr(e?.response?.data?.detail || "Set-cover failed"); }
+    } else {
+      onImagesChange(next);
+    }
+  };
+
   return (
     <div data-testid="property-image-manager">
       <label className="rs-label">Images</label>
@@ -638,7 +662,11 @@ function PropertyImagesSection({ editing, onImagesChange }) {
 
       {/* Gallery — every image gets delete + reorder, regardless of source */}
       {images.length > 0 && (
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="property-images-grid">
+        <>
+          <div className="mt-4 text-[11px] text-slate-500 flex items-center gap-1.5">
+            <Star className="w-3 h-3 text-[#C5A880] fill-current" /> Hover any image to <strong>set as cover</strong>, reorder, or delete.
+          </div>
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="property-images-grid">
           {images.map((ref, i) => (
             <div key={`${typeof ref === "string" ? ref : "img"}-${i}`} className="relative group rs-card overflow-hidden" data-testid={`property-image-${i}`}>
               <div className="aspect-[4/3] bg-slate-100">
@@ -654,13 +682,17 @@ function PropertyImagesSection({ editing, onImagesChange }) {
                 <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/60 text-white text-[9px] uppercase tracking-wider">URL</span>
               )}
               <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100">
+                {i !== 0 && (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); setCover(i); }} title="Set as cover" className="p-1.5 rounded bg-white/90 text-[#C5A880] hover:text-amber-600" data-testid={`img-cover-${i}`}><Star className="w-4 h-4 fill-current" /></button>
+                )}
                 <button type="button" onClick={(e) => { e.stopPropagation(); reorder(i, -1); }} disabled={i === 0} title="Move up" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-up-${i}`}><ChevronUp className="w-4 h-4" /></button>
                 <button type="button" onClick={(e) => { e.stopPropagation(); reorder(i, 1); }} disabled={i === images.length - 1} title="Move down" className="p-1.5 rounded bg-white/90 text-[#0A192F] disabled:opacity-40" data-testid={`img-down-${i}`}><ChevronDown className="w-4 h-4" /></button>
                 <button type="button" onClick={(e) => { e.stopPropagation(); removeAt(i); }} title="Delete" className="p-1.5 rounded bg-white/90 text-red-600" data-testid={`img-del-${i}`}><Trash2 className="w-4 h-4" /></button>
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        </>
       )}
     </div>
   );

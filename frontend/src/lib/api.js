@@ -13,7 +13,12 @@ export const resolvePropertyImage = (property, idx = 0) => {
   const ref = property.images[idx];
   if (!ref) return "";
   if (typeof ref === "string" && ref.startsWith("storage://")) {
-    return `${API}/properties/${property.slug || property.id}/images/${idx}`;
+    // Key the cache to the underlying file (last path segment) — without
+    // this, after a delete/reorder the index URL stays the same and the
+    // browser serves the previous image from cache.
+    const tail = ref.split("/").pop() || "";
+    const cacheKey = tail.slice(0, 16) || String(idx);
+    return `${API}/properties/${property.slug || property.id}/images/${idx}?v=${encodeURIComponent(cacheKey)}`;
   }
   return ref;
 };
