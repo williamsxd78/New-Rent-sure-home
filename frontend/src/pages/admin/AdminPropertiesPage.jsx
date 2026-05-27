@@ -101,8 +101,8 @@ export default function AdminPropertiesPage() {
       </div>
 
       {autoImportBusy && (
-        <div className="mb-4 p-3 rounded-lg bg-[#0A192F] text-white text-sm flex items-center gap-2" data-testid="auto-import-loading">
-          <Loader2 className="w-4 h-4 animate-spin" /> Importing the page from your bookmarklet…
+        <div className="mb-4" data-testid="auto-import-loading">
+          <ImportProgressSteps visible={true} />
         </div>
       )}
       {autoImportErr && !autoImportBusy && (
@@ -297,6 +297,42 @@ function BookmarkletModal({ onClose }) {
   );
 }
 
+function ImportProgressSteps({ visible }) {
+  // Cycles through the three real backend steps so admins know the
+  // 1-3s pause is purposeful work (not a stuck request).
+  const STEPS = [
+    "Fetching listing page…",
+    "Extracting price, beds, baths & description…",
+    "Saving images to your storage…",
+  ];
+  const [idx, setIdx] = useState(0);
+  useEffect(() => {
+    if (!visible) { setIdx(0); return; }
+    const t = setInterval(() => setIdx((i) => Math.min(i + 1, STEPS.length - 1)), 900);
+    return () => clearInterval(t);
+  }, [visible]);
+  if (!visible) return null;
+  return (
+    <div className="mt-4 p-4 rounded-xl bg-[#0A192F] text-white" data-testid="import-progress">
+      <div className="flex items-center gap-2.5 mb-3">
+        <Loader2 className="w-4 h-4 animate-spin text-[#C5A880]" />
+        <div className="text-sm font-semibold">{STEPS[idx]}</div>
+      </div>
+      <div className="space-y-1.5">
+        {STEPS.map((s, i) => (
+          <div key={i} className={`flex items-center gap-2 text-xs ${i < idx ? "text-emerald-300" : i === idx ? "text-white" : "text-slate-400"}`}>
+            {i < idx ? <CheckCircle2 className="w-3.5 h-3.5" /> : i === idx ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span className="w-3.5 h-3.5 rounded-full border border-slate-500 inline-block" />}
+            <span>{s}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 text-[10px] text-slate-300 leading-relaxed">
+        Images are being downloaded to your server so they keep working even if the source site rotates its CDN.
+      </div>
+    </div>
+  );
+}
+
 function ImportFromUrlModal({ onClose, onImported }) {
   const [mode, setMode] = useState("url"); // "url" or "paste"
   const [url, setUrl] = useState("");
@@ -403,6 +439,8 @@ function ImportFromUrlModal({ onClose, onImported }) {
               <div>{err}</div>
             </div>
           )}
+
+          <ImportProgressSteps visible={busy} />
 
           <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
             <div className="font-semibold text-[#0A192F] mb-1 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> What gets imported</div>
