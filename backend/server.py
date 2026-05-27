@@ -1127,11 +1127,84 @@ async def admin_list_properties(admin=Depends(require_admin)):
     return await db.properties.find({}, {"_id": 0}).to_list(500)
 
 
+async def _localize_external_images(pid: str, images: list) -> list:
+    """For any plain http(s) URL in `images`, download it once and replace
+    with a `storage://...` reference. Idempotent — `storage://` entries and
+    non-string entries pass through untouched. Failed downloads are dropped
+    with a log line, so a broken Zillow CDN URL never blocks property save.
+    """
+    out: list = []
+    for img in images or []:
+        if not isinstance(img, str):
+            out.append(img)
+            continue
+        if img.startswith("storage://"):
+            out.append(img)
+            continue
+        if not (img.startswith("http://") or img.startswith("https://")):
+            out.append(img)
+            continue
+        # External URL — download and re-store locally
+        try:
+            r = await asyncio.to_thread(_download_image, img)
+        except Exception as e:
+            logger.warning(f"Could not localize image {img}: {e}")
+            continue
+        if not r:
+            logger.warning(f"Could not localize image {img}: download returned no data")
+            continue
+        data, ctype, ext = r
+        path = build_path("properties", pid, ext)
+        try:
+            await asyncio.to_thread(put_object, path, data, ctype)
+            out.append(f"storage://{path}")
+        except Exception as e:
+            logger.warning(f"Storage write failed for {img}: {e}")
+            continue
+    return out
+
+
+def _download_image(url: str):
+    """Fetch an image URL with a realistic browser UA. Returns
+    `(bytes, content_type, ext)` or None on failure. Caps at 12 MB."""
+    import requests as _r
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": url,
+    }
+    try:
+        resp = _r.get(url, headers=headers, timeout=20, stream=True)
+        resp.raise_for_status()
+    except Exception:
+        return None
+    ctype = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip().lower()
+    if not ctype.startswith("image/"):
+        return None
+    data = bytearray()
+    for chunk in resp.iter_content(64 * 1024):
+        data.extend(chunk)
+        if len(data) > 12 * 1024 * 1024:
+            return None
+    ext_map = {
+        "image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+        "image/webp": "webp", "image/avif": "avif", "image/gif": "gif",
+    }
+    ext = ext_map.get(ctype, "jpg")
+    return bytes(data), ctype, ext
+
+
 @api.post("/admin/properties")
 async def admin_create_property(p: PropertyIn, admin=Depends(require_admin)):
     doc = p.model_dump()
     doc["id"] = str(uuid.uuid4())
     doc["slug"] = await _unique_property_slug(db, _slugify(f"{doc.get('title','')} {doc.get('city','')}"))
+    # Re-host any external image URLs locally so they always load on our domain
+    doc["images"] = await _localize_external_images(doc["id"], doc.get("images") or [])
     doc["created_at"] = datetime.now(timezone.utc).isoformat()
     doc["updated_at"] = doc["created_at"]
     await db.properties.insert_one(doc)
@@ -1173,6 +1246,8 @@ async def admin_update_property(pid: str, p: PropertyIn, admin=Depends(require_a
         )
     else:
         update["slug"] = existing["slug"]
+    # Re-host any newly added external image URLs locally
+    update["images"] = await _localize_external_images(pid, update.get("images") or [])
     update["updated_at"] = datetime.now(timezone.utc).isoformat()
     await db.properties.update_one({"id": pid}, {"$set": update})
     doc = await db.properties.find_one({"id": pid}, {"_id": 0})

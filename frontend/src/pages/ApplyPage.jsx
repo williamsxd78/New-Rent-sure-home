@@ -1015,7 +1015,9 @@ function Step9({ property, appResult, paymentDone, handlePay, paymentMethod, set
       {!paypalEnabled && !bankEnabled && (
         <div className="mt-5 rs-card p-7 border-amber-200 bg-amber-50 text-amber-900" data-testid="no-payment-methods">
           <div className="font-display font-semibold flex items-center gap-2"><AlertCircle className="w-5 h-5" /> Payment temporarily unavailable</div>
-          <p className="text-sm mt-2">Our payment methods are being updated. Please contact <a href="mailto:support@rentsurehomes.com" className="underline font-medium">support@rentsurehomes.com</a> to complete your application.</p>
+          <p className="text-sm mt-2">
+            Our online payment methods are being updated. Please contact <a href="mailto:support@rentsurehomes.com" className="underline font-medium">support@rentsurehomes.com</a> with your Application ID <span className="font-mono font-semibold">{appResult?.application_number}</span> to complete your application.
+          </p>
         </div>
       )}
 

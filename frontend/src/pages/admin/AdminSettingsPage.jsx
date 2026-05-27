@@ -74,6 +74,31 @@ export default function AdminSettingsPage() {
       <h1 className="font-display text-3xl font-bold text-[#0A192F] mb-2">Settings</h1>
       <p className="text-sm text-slate-500 mb-6">Configure live integrations — changes go into effect immediately.</p>
 
+      {(() => {
+        const paypalOn = s.paypal.enabled !== false;
+        const bankOn = !!s.bank_transfer?.enabled;
+        if (!paypalOn && !bankOn) {
+          return (
+            <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm flex items-start gap-3" data-testid="payment-method-warning">
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold">No payment methods are active</div>
+                <div className="mt-0.5">Applicants currently can't pay the application fee online. Enable either <strong>PayPal</strong> or <strong>Bank Transfer</strong> below.</div>
+              </div>
+            </div>
+          );
+        }
+        if (!paypalOn && bankOn) {
+          return (
+            <div className="mb-6 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-2" data-testid="payment-method-warning">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <div>PayPal is disabled — applicants will only see <strong>Bank Transfer</strong> as a payment option.</div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       <div className="flex gap-1 border-b border-slate-200 mb-6">
         {[
           { k: "paypal", label: "PayPal", icon: CreditCard },
