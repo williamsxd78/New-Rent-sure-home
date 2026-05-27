@@ -196,19 +196,20 @@ function PropertyGallery({ property, onOpen }) {
     );
   }
 
-  // 2+ images: big hero (60%) + big secondary (40%) side by side.
-  // When n > 2, the secondary image gets a "+N photos" overlay so users
-  // know there are more. Click either → opens the lightbox.
+  // 2+ images: big hero (left, ~65%) + small stacked column on the right
+  // containing one preview image and one "View all" tile that shows a 2x2
+  // mini-grid of the next images + the total count.
   const extra = Math.max(0, n - 2);
+  const previewIdxs = [2, 3, 4, 5].filter((i) => i < n);
   return (
     <div
-      className="mt-6 grid grid-cols-1 lg:grid-cols-5 gap-3 h-auto lg:h-[520px]"
+      className="mt-6 grid grid-cols-1 lg:grid-cols-12 gap-3 h-auto lg:h-[520px]"
       data-testid="property-gallery"
     >
-      {/* Hero — 3/5 of the row (60%) on desktop */}
+      {/* Hero — 8/12 of the row (~67%) on desktop */}
       <button
         onClick={() => onOpen(0)}
-        className="lg:col-span-3 aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group"
+        className="lg:col-span-8 aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group"
         data-testid="gallery-hero"
       >
         <img
@@ -218,28 +219,56 @@ function PropertyGallery({ property, onOpen }) {
         />
       </button>
 
-      {/* Secondary — 2/5 (40%) — full height */}
-      <button
-        onClick={() => onOpen(1)}
-        className="lg:col-span-2 aspect-[16/10] lg:aspect-auto lg:h-full rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group relative"
-        data-testid="gallery-thumb-1"
-      >
-        <img
-          src={resolvePropertyImage(property, 1)}
-          alt={`${property.title} photo 2`}
-          className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500"
-        />
-        {extra > 0 && (
-          <div
-            className="absolute inset-0 bg-black/55 flex flex-col items-center justify-center text-white pointer-events-none"
-            data-testid="gallery-more-overlay"
-          >
+      {/* Right column: small preview + "View all" tile */}
+      <div className="lg:col-span-4 grid grid-cols-2 lg:grid-cols-1 lg:grid-rows-2 gap-3 h-[220px] sm:h-[280px] lg:h-full">
+        <button
+          onClick={() => onOpen(1)}
+          className="rounded-2xl overflow-hidden bg-slate-100 cursor-zoom-in group"
+          data-testid="gallery-thumb-1"
+        >
+          <img
+            src={resolvePropertyImage(property, 1)}
+            alt={`${property.title} photo 2`}
+            className="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-500"
+          />
+        </button>
+
+        {/* View-all tile: mini mosaic + "+N photos" label */}
+        <button
+          onClick={() => onOpen(0)}
+          className="relative rounded-2xl overflow-hidden bg-slate-900 cursor-zoom-in group"
+          data-testid="gallery-view-all"
+        >
+          {previewIdxs.length > 0 ? (
+            <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-0.5">
+              {previewIdxs.map((i) => (
+                <img
+                  key={i}
+                  src={resolvePropertyImage(property, i)}
+                  alt=""
+                  className="w-full h-full object-cover opacity-50 group-hover:opacity-60 transition"
+                />
+              ))}
+              {Array.from({ length: 4 - previewIdxs.length }).map((_, j) => (
+                <div key={`f${j}`} className="bg-slate-800" />
+              ))}
+            </div>
+          ) : (
+            <img
+              src={resolvePropertyImage(property, 1)}
+              alt=""
+              className="w-full h-full object-cover opacity-50 group-hover:opacity-60 transition"
+            />
+          )}
+          <div className="absolute inset-0 bg-black/45 flex flex-col items-center justify-center text-white pointer-events-none">
             <Grid3x3 className="w-7 h-7 mb-1.5" />
-            <div className="font-display font-semibold text-lg">+{extra} photos</div>
-            <div className="text-xs uppercase tracking-wider opacity-70 mt-0.5">Tap to view all</div>
+            <div className="font-display font-semibold text-lg">View all photos</div>
+            <div className="text-xs uppercase tracking-wider opacity-80 mt-0.5">
+              {n} {n === 1 ? "photo" : "photos"}{extra > 0 ? ` · +${extra} more` : ""}
+            </div>
           </div>
-        )}
-      </button>
+        </button>
+      </div>
     </div>
   );
 }
