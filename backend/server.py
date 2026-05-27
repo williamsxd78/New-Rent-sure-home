@@ -1305,11 +1305,14 @@ async def get_property_image(pid: str, idx: int):
         if isinstance(ref, str) and (ref.startswith("http://") or ref.startswith("https://")):
             from fastapi.responses import RedirectResponse
             return RedirectResponse(ref, status_code=302)
+        logger.warning(f"Property {pid} image idx={idx} has unrecognised ref: {ref!r}")
         raise HTTPException(404, "Image not available")
     storage_path = ref[len("storage://"):]
     try:
         content, ctype = await asyncio.to_thread(get_object, storage_path)
-    except Exception:
+    except Exception as e:
+        # Log the exact failure so operator can see in journalctl
+        logger.warning(f"Image fetch failed pid={pid} idx={idx} path={storage_path!r}: {e}")
         raise HTTPException(404, "Image not available")
     return Response(content=content, media_type=ctype, headers={"Cache-Control": "public, max-age=3600"})
 
