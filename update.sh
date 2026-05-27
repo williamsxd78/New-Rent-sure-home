@@ -39,7 +39,14 @@ else
   step "Local edits detected — auto-stashing them safely…"
   sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git stash push -u -m 'auto-stash-$(date +%F-%H%M)' || true"
 fi
-sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git pull --ff-only"
+
+# Emergent's "Save to GitHub" force-pushes the rewritten history, so a normal
+# fast-forward pull fails. We fetch, then hard-reset to origin/main — this is
+# safe because: (1) .env / uploads / DB live outside the repo, (2) any local
+# edits were already stashed above, (3) origin is the source of truth.
+BRANCH=$(sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git rev-parse --abbrev-ref HEAD")
+sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git fetch origin --prune"
+sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && git reset --hard origin/$BRANCH"
 
 step "Installing/updating backend deps…"
 sudo -u "$APP_USER" "$BACKEND_DIR/.venv/bin/pip" install -r "$BACKEND_DIR/requirements.txt"
