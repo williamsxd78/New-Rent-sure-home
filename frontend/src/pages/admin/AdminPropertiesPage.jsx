@@ -174,24 +174,12 @@ export default function AdminPropertiesPage() {
               <div className="sm:col-span-2"><label className="rs-label">Description</label><textarea rows={3} className="rs-input" value={editing.description} onChange={(e) => setEditing({ ...editing, description: e.target.value })} /></div>
               <div className="sm:col-span-2"><label className="rs-label">Amenities (comma-separated)</label><input className="rs-input" value={arrToStr(editing.amenities)} onChange={(e) => setEditing({ ...editing, amenities: e.target.value })} /></div>
               <div className="sm:col-span-2"><label className="rs-label">Tags (comma-separated)</label><input className="rs-input" value={arrToStr(editing.tags)} onChange={(e) => setEditing({ ...editing, tags: e.target.value })} /></div>
-              <div className="sm:col-span-2"><label className="rs-label">External Image URLs (optional, comma-separated)</label><input className="rs-input" value={arrToStr(editing.images?.filter?.((x) => typeof x === "string" && !x.startsWith("storage://")) || editing.images)} onChange={(e) => {
-                const externals = e.target.value.split(",").map((s) => s.trim()).filter(Boolean);
-                const storedOnly = (editing.images || []).filter((x) => typeof x === "string" && x.startsWith("storage://"));
-                setEditing({ ...editing, images: [...storedOnly, ...externals] });
-              }} /></div>
-              {editing.id ? (
-                <div className="sm:col-span-2">
-                  <label className="rs-label">Uploaded Images</label>
-                  <PropertyImageManager
-                    property={editing}
-                    onChange={(images) => setEditing({ ...editing, images })}
-                  />
-                </div>
-              ) : (
-                <div className="sm:col-span-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  Save the property first to upload images via drag-and-drop. You can also add external image URLs above.
-                </div>
-              )}
+
+              {/* Images section — unified manager. Works pre-save (just edits local state) and post-save (calls the upload/delete endpoints). */}
+              <div className="sm:col-span-2">
+                <PropertyImagesSection editing={editing} setEditing={setEditing} />
+              </div>
+
               <div className="sm:col-span-2"><label className="rs-label">Required Documents (one per line)</label><textarea rows={4} className="rs-input" value={Array.isArray(editing.required_documents) ? editing.required_documents.join("\n") : editing.required_documents} onChange={(e) => setEditing({ ...editing, required_documents: e.target.value })} /></div>
               <div><label className="rs-label">Status</label><select className="rs-input" value={editing.status} onChange={(e) => setEditing({ ...editing, status: e.target.value })}><option value="available">Available</option><option value="rented">Rented</option><option value="hidden">Hidden</option><option value="pending">Pending</option></select></div>
               <label className="flex items-center gap-2 mt-7"><input type="checkbox" checked={editing.pet_friendly} onChange={(e) => setEditing({ ...editing, pet_friendly: e.target.checked })} /> Pet Friendly</label>
